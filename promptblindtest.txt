@@ -1,0 +1,56 @@
+Tu es un développeur Full-Stack expert et un architecte logiciel. Je souhaite concevoir et développer de A à Z une application web de Blind Test compétitif et d'entraînement.
+
+Voici la stack technique retenue :
+- Frontend : React.js avec Tailwind CSS.
+- Backend : Java (Quarkus ou Spring Boot) avec API REST et WebSockets pour le temps réel.
+- Base de données : PostgreSQL.
+- Authentification : Google OAuth2.
+
+Voici le cahier des charges fonctionnel et technique détaillé :
+
+1. GESTION DU FLUX AUDIO (API DEEZER)
+- Source audio : API publique Deezer (https://api.deezer.com).
+- Nous exploitons les extraits MP3 de 30 secondes fournis dans le champ "preview" des morceaux.
+- Aucun compte ni login musical n'est demandé aux joueurs. La balise audio HTML5 lira directement ces flux MP3.
+- Le backend se charge de requérir ou d'importer les playlists/titres par thème (pour respecter les quotas de requêtes et masquer les réponses).
+
+2. AUTHENTIFICATION & PROFILS
+- Authentification des utilisateurs uniquement via Google (OAuth2).
+- Profil utilisateur :
+  * ELO global (commence à 1000 points pour tout le monde).
+  * Statistiques et niveau de maîtrise détaillés par thème (ex: Années 60, Années 80, Pop, Rock, Rap, etc.).
+  * Historique des matchs en versus.
+
+3. LES MODES DE JEU
+A. Mode Entraînement (Solo) :
+- Sélection d'un thème précis ou mode "Général" (tous thèmes confondus).
+- Les morceaux s'enchaînent. Les réussites/échecs alimentent les statistiques du joueur sur le thème joué.
+
+B. Mode Versus (Classé / Ranked) :
+- Matchmaking basé sur l'ELO : recherche d'un adversaire dont l'ELO est proche.
+- Plage dynamique : si aucun adversaire n'est trouvé après quelques secondes, la plage de recherche d'ELO s'élargit progressivement.
+- Calcul ELO : gain ou perte de points ajusté dynamiquement selon l'écart d'ELO entre les deux joueurs à l'issue de la partie.
+
+4. GAMEPLAY & SYSTÈME DE RÉPONSE
+- Synchronisation : la musique se lance en même temps pour les deux joueurs via WebSocket.
+- Buzz : le joueur appuie sur "Entrée" (ou bouton buzz) dès qu'il pense avoir trouvé.
+  * La musique se met instantanément en pause pour les deux participants.
+  * Le joueur qui a buzzé voit apparaître un champ de saisie pour entrer SOIT le titre, SOIT l'artiste.
+- Tolérance aux fautes (Fuzzy Matching) :
+  * Implémenter un algorithme de comparaison de chaînes (ex: distance de Levenshtein avec seuil de tolérance) pour accepter les fautes d'orthographe ou de frappe courantes (ex: "edric" pour "Cedric", "jhonny" pour "Johnny").
+- Seconde chance / Bonus :
+  * Si la première réponse (titre ou artiste) est validée, un chrono de 10 secondes démarre pour que le joueur tente de donner la deuxième information.
+- Pénalité : en cas d'échec ou d'expiration du temps, le tour passe ou le point est attribué à l'adversaire selon les règles définies.
+
+5. SÉCURITÉ & ANTI-TRICHE (ESSENTIEL)
+- Les métadonnées du morceau (titre, artiste, id Deezer explicite) ne doivent JAMAIS transiter vers le frontend avant la fin de la manche. Le frontend ne reçoit qu'un identifiant de manche éphémère et l'URL du MP3 30s.
+- Toute validation de réponse (comparaison Levenshtein) doit impérativement s'exécuter côté serveur.
+
+METHODOLOGIE DE TRAVAIL :
+Ne génère pas tout le projet d'un coup. Agis comme un lead developer qui guide pas à pas. Pour démarrer, présente-moi uniquement :
+1. L'architecture globale du projet (structure des dossiers backend/frontend et flux d'échange en WebSocket/REST).
+2. Le schéma relationnel PostgreSQL (tables utilisateurs, stats_themes, morceaux, parties, etc.).
+3. La formule mathématique pour le calcul d'ELO et la stratégie de matchmaking avec élargissement de range.
+4. L'algorithme de Fuzzy Matching (Levenshtein) prévu pour le backend.
+
+Attends ma validation de cette première étape avant d'écrire le code d'initialisation du backend et du frontend.
