@@ -40,6 +40,7 @@ public class SecurityConfig {
                         // Endpoints publics pour le jeu et WebSockets
                         .requestMatchers(
                                 "/error",
+                                "/auth/**",
                                 "/api/v1/auth/**",
                                 "/api/v1/themes/**",
                                 "/api/v1/tracks/**",
@@ -69,8 +70,21 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        List<String> origins = Arrays.asList(allowedOrigins.split(","));
-        configuration.setAllowedOrigins(origins);
+        // Support automatique de tous les déploiements Vercel et Render
+        configuration.addAllowedOriginPattern("https://*.vercel.app");
+        configuration.addAllowedOriginPattern("https://*.onrender.com");
+        configuration.addAllowedOriginPattern("http://localhost:*");
+        configuration.addAllowedOriginPattern("http://127.0.0.1:*");
+
+        if (allowedOrigins != null && !allowedOrigins.isBlank()) {
+            for (String origin : allowedOrigins.split(",")) {
+                String trimmed = origin.trim();
+                if (!trimmed.isEmpty()) {
+                    configuration.addAllowedOriginPattern(trimmed);
+                }
+            }
+        }
+
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(true);

@@ -1,8 +1,9 @@
 import axios from 'axios';
 import type { Theme, User, UserThemeStats } from '../types';
 
-export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api/v1';
-export const BACKEND_URL = API_BASE_URL.replace(/\/api\/v1\/?$/, '');
+const rawApiUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8080/api/v1').trim().replace(/\/+$/, '');
+export const BACKEND_URL = rawApiUrl.replace(/\/api\/v1\/?$/, '');
+export const API_BASE_URL = `${BACKEND_URL}/api/v1`;
 export const GOOGLE_AUTH_URL = `${BACKEND_URL}/oauth2/authorization/google`;
 
 export const api = axios.create({
@@ -21,8 +22,10 @@ api.interceptors.request.use((config) => {
 
 export const authService = {
   getMe: async (customToken?: string): Promise<User> => {
-    const headers = customToken ? { Authorization: `Bearer ${customToken}` } : {};
-    const res = await api.get<User>('/auth/me', { headers });
+    const token = customToken || localStorage.getItem('blindtest_token');
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    const params = token ? { token } : {};
+    const res = await api.get<User>('/auth/me', { headers, params });
     return res.data;
   },
   devLogin: async (displayName: string, email?: string): Promise<User> => {

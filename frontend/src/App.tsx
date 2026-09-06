@@ -40,18 +40,27 @@ export const App: React.FC = () => {
       }
 
       // 3. Interception et récupération du profil avant de rediriger vers le lobby
-      authService
-        .getMe(token || undefined)
-        .then((userData) => {
+      const fetchProfile = async () => {
+        try {
+          const userData = await authService.getMe(token || undefined);
           setUser(userData);
-        })
-        .catch((err) => {
-          console.error('Erreur de récupération du profil Google :', err);
-        })
-        .finally(() => {
+        } catch (firstErr) {
+          console.warn('Premier essai /auth/me échoué, nouvelle tentative...', firstErr);
+          // Petite temporisation (600ms) pour absorber un cold start
+          await new Promise((r) => setTimeout(r, 600));
+          try {
+            const retryData = await authService.getMe(token || undefined);
+            setUser(retryData);
+          } catch (err) {
+            console.error('Erreur finale de récupération du profil Google :', err);
+          }
+        } finally {
           window.history.replaceState({}, document.title, '/');
           setIsAuthenticating(false);
-        });
+        }
+      };
+
+      fetchProfile();
     }
   }, [setUser]);
 

@@ -1,5 +1,6 @@
 import { Client } from '@stomp/stompjs';
 import type { IMessage } from '@stomp/stompjs';
+import { BACKEND_URL } from './api';
 
 class WebSocketService {
   private client: Client | null = null;
@@ -11,7 +12,11 @@ class WebSocketService {
       return;
     }
 
-    const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8080/ws';
+    const defaultWsUrl = BACKEND_URL.startsWith('https')
+      ? BACKEND_URL.replace(/^https/, 'wss') + '/ws'
+      : BACKEND_URL.replace(/^http/, 'ws') + '/ws';
+
+    const wsUrl = import.meta.env.VITE_WS_URL || defaultWsUrl;
 
     this.client = new Client({
       brokerURL: wsUrl,
