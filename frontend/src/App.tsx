@@ -11,19 +11,46 @@ import { authService } from './services/api';
 export const App: React.FC = () => {
   const { gameId, phase, onRoundStart, onPlayerBuzzed, onFirstAnswerCorrect, onStealOpen, onRoundEnd, onMatchFinished } = useGameStore();
   const { setUser } = useAuthStore();
+  const [isAuthenticating, setIsAuthenticating] = useState(() => {
+    return window.location.pathname.includes('/auth/callback') || window.location.pathname.includes('/auth/classback');
+  });
   const [currentView, setCurrentView] = useState<'LOBBY' | 'PROFILE'>('LOBBY');
 
   // Gestion du retour OAuth2 Google (/auth/callback)
   useEffect(() => {
-    if (window.location.pathname.includes('/auth/callback')) {
-      authService.getMe()
+    const pathname = window.location.pathname;
+    if (pathname.includes('/auth/callback') || pathname.includes('/auth/classback')) {
+      // 1. Extraction du token depuis les query params ou le hash URL
+      const urlParams = new URLSearchParams(window.location.search);
+      const hashParams = new URLSearchParams(
+        window.location.hash.startsWith('#') ? window.location.hash.substring(1) : window.location.hash
+      );
+
+      const token =
+        urlParams.get('token') ||
+        urlParams.get('accessToken') ||
+        urlParams.get('access_token') ||
+        urlParams.get('jwt') ||
+        hashParams.get('token') ||
+        hashParams.get('access_token');
+
+      // 2. Sauvegarde du token dans le stockage local avant la redirection
+      if (token) {
+        localStorage.setItem('blindtest_token', token);
+      }
+
+      // 3. Interception et récupération du profil avant de rediriger vers le lobby
+      authService
+        .getMe(token || undefined)
         .then((userData) => {
           setUser(userData);
-          window.history.replaceState({}, document.title, '/');
         })
         .catch((err) => {
-          console.error("Erreur de récupération du profil Google :", err);
+          console.error('Erreur de récupération du profil Google :', err);
+        })
+        .finally(() => {
           window.history.replaceState({}, document.title, '/');
+          setIsAuthenticating(false);
         });
     }
   }, [setUser]);
@@ -71,6 +98,16 @@ export const App: React.FC = () => {
       if (sub) sub.unsubscribe();
     };
   }, [gameId, onRoundStart, onPlayerBuzzed, onFirstAnswerCorrect, onStealOpen, onRoundEnd, onMatchFinished]);
+
+  if (isAuthenticating) {
+    return (
+      <div className="min-h-screen bg-dark-950 text-slate-100 flex flex-col items-center justify-center space-y-4">
+        <div className="w-12 h-12 border-4 border-brand-500 border-t-transparent rounded-full animate-spin" />
+        <div className="text-lg font-bold text-white">Connexion avec Google en cours...</div>
+        <p className="text-xs text-slate-400">Interception des accès et initialisation du profil...</p>
+      </div>
+    );
+  }
 
   const isInGame = gameId !== null && phase !== 'LOBBY';
 

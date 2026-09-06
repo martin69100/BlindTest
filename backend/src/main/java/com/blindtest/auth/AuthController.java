@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 @RestController
@@ -35,14 +36,40 @@ public class AuthController {
     }
 
     @GetMapping("/me")
-    public ResponseEntity<?> getCurrentUser(@AuthenticationPrincipal OAuth2User principal) {
-        if (principal == null) {
-            return ResponseEntity.status(401).body(Map.of("error", "Non authentifié"));
+    public ResponseEntity<?> getCurrentUser(
+            @AuthenticationPrincipal OAuth2User principal,
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @RequestParam(value = "token", required = false) String tokenParam) {
+        if (principal != null) {
+            String googleId = principal.getAttribute("sub");
+            return userRepository.findByGoogleId(googleId)
+                    .map(ResponseEntity::ok)
+                    .orElse(ResponseEntity.notFound().build());
         }
-        String googleId = principal.getAttribute("sub");
-        return userRepository.findByGoogleId(googleId)
-                .map(ResponseEntity::ok)
-                .orElse(ResponseEntity.notFound().build());
+
+        // Support du token (Bearer header ou paramètre URL pour requêtes cross-origin SPA)
+        String token = null;
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            token = authHeader.substring(7).trim();
+        } else if (tokenParam != null && !tokenParam.isBlank()) {
+            token = tokenParam.trim();
+        }
+
+        if (token != null && !token.isEmpty()) {
+            Optional<User> byGoogleId = userRepository.findByGoogleId(token);
+            if (byGoogleId.isPresent()) {
+                return ResponseEntity.ok(byGoogleId.get());
+            }
+            try {
+                UUID userId = UUID.fromString(token);
+                Optional<User> byId = userRepository.findById(userId);
+                if (byId.isPresent()) {
+                    return ResponseEntity.ok(byId.get());
+                }
+            } catch (IllegalArgumentException ignored) {}
+        }
+
+        return ResponseEntity.status(401).body(Map.of("error", "Non authentifié"));
     }
 
     /**

@@ -10,9 +10,19 @@ export const api = axios.create({
   withCredentials: true,
 });
 
+// Intercepteur automatique pour attacher le token Bearer si présent
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('blindtest_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 export const authService = {
-  getMe: async (): Promise<User> => {
-    const res = await api.get<User>('/auth/me');
+  getMe: async (customToken?: string): Promise<User> => {
+    const headers = customToken ? { Authorization: `Bearer ${customToken}` } : {};
+    const res = await api.get<User>('/auth/me', { headers });
     return res.data;
   },
   devLogin: async (displayName: string, email?: string): Promise<User> => {

@@ -9,6 +9,7 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -51,7 +52,15 @@ public class SecurityConfig {
                 )
                 .oauth2Login(oauth -> oauth
                         .userInfoEndpoint(userInfo -> userInfo.userService(customOAuth2UserService))
-                        .defaultSuccessUrl(frontendUrl + "/auth/callback", true)
+                        .successHandler((request, response, authentication) -> {
+                            OAuth2User oAuth2User = (OAuth2User) authentication.getPrincipal();
+                            String googleId = oAuth2User.getAttribute("sub");
+                            String redirectUrl = frontendUrl + "/auth/callback";
+                            if (googleId != null) {
+                                redirectUrl += "?token=" + googleId + "&googleId=" + googleId;
+                            }
+                            response.sendRedirect(redirectUrl);
+                        })
                 );
 
         return http.build();

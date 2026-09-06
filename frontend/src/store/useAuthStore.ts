@@ -40,6 +40,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: () => {
+    localStorage.removeItem('blindtest_token');
     get().setUser(null);
   },
 
