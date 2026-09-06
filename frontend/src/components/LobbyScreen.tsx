@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Swords, Dumbbell, Sparkles, Disc, Flame, Music, Radio, Mic, ChevronRight } from 'lucide-react';
 import type { Theme } from '../types';
-import { themeService, matchmakingService, soloService } from '../services/api';
+import { themeService, matchmakingService, soloService, GOOGLE_AUTH_URL } from '../services/api';
 import { useAuthStore } from '../store/useAuthStore';
 import { useGameStore } from '../store/useGameStore';
 import { wsService } from '../services/websocket';
@@ -108,7 +108,7 @@ export const LobbyScreen: React.FC = () => {
 
           {/* Bouton Google OAuth2 */}
           <a
-            href="http://localhost:8080/oauth2/authorization/google"
+            href={GOOGLE_AUTH_URL}
             className="w-full bg-white hover:bg-slate-100 text-slate-900 font-bold py-3.5 px-6 rounded-2xl flex items-center justify-center space-x-3 transition-all shadow-xl hover:shadow-white/10 active:scale-98 cursor-pointer group"
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24">

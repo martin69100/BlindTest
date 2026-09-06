@@ -27,6 +27,9 @@ public class SecurityConfig {
     @Value("${blindtest.cors.allowed-origins:http://localhost:5173,http://localhost:3000}")
     private String allowedOrigins;
 
+    @Value("${blindtest.frontend.url:http://localhost:5173}")
+    private String frontendUrl;
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
@@ -48,7 +51,7 @@ public class SecurityConfig {
                 )
                 .oauth2Login(oauth -> oauth
                         .userInfoEndpoint(userInfo -> userInfo.userService(customOAuth2UserService))
-                        .defaultSuccessUrl("http://localhost:5173/auth/callback", true)
+                        .defaultSuccessUrl(frontendUrl + "/auth/callback", true)
                 );
 
         return http.build();
