@@ -223,4 +223,43 @@ class LevenshteinMatcherTest {
         assertFalse(matcher.evaluate("david", bowie, false, false).matched(), "david seul ne doit pas valider David Bowie");
         assertTrue(matcher.evaluate("bowie", bowie, false, false).matched(), "bowie doit valider David Bowie");
     }
+
+    @Test
+    @DisplayName("Accepter l'artiste en feat ('Sia') sur 'David Guetta feat. Sia' ou 'Titanium (feat. Sia)'")
+    void testFeaturedArtistMatching() {
+        // Cas 1 : Le feat est dans le titre officiel
+        Track trackWithFeatInTitle = Track.builder()
+                .title("Titanium (feat. Sia)")
+                .normalizedTitle(StringNormalizer.normalize("Titanium (feat. Sia)"))
+                .artist("David Guetta")
+                .normalizedArtist(StringNormalizer.normalize("David Guetta"))
+                .build();
+
+        // "Sia" doit être validé comme Artiste
+        VerificationResult siaResult1 = matcher.evaluate("Sia", trackWithFeatInTitle, false, false);
+        assertTrue(siaResult1.matched(), "Sia doit être validé comme Artiste quand présent dans le titre");
+        assertEquals(GuessType.ARTIST, siaResult1.guessType());
+
+        // "David Guetta" et "Guetta" doivent aussi être validés
+        assertTrue(matcher.evaluate("David Guetta", trackWithFeatInTitle, false, false).matched());
+        assertTrue(matcher.evaluate("Guetta", trackWithFeatInTitle, false, false).matched());
+
+        // "Titanium" doit être validé comme Titre
+        VerificationResult titaniumResult1 = matcher.evaluate("Titanium", trackWithFeatInTitle, false, false);
+        assertTrue(titaniumResult1.matched());
+        assertEquals(GuessType.TITLE, titaniumResult1.guessType());
+
+        // Cas 2 : Le feat est dans le nom d'artiste
+        Track trackWithFeatInArtist = Track.builder()
+                .title("Titanium")
+                .normalizedTitle(StringNormalizer.normalize("Titanium"))
+                .artist("David Guetta feat. Sia")
+                .normalizedArtist(StringNormalizer.normalize("David Guetta feat. Sia"))
+                .build();
+
+        VerificationResult siaResult2 = matcher.evaluate("Sia", trackWithFeatInArtist, false, false);
+        assertTrue(siaResult2.matched(), "Sia doit être validé comme Artiste quand présent dans l'artiste");
+        assertEquals(GuessType.ARTIST, siaResult2.guessType());
+        assertTrue(matcher.evaluate("David Guetta", trackWithFeatInArtist, false, false).matched());
+    }
 }

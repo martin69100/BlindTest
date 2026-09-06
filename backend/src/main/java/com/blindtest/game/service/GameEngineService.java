@@ -122,6 +122,17 @@ public class GameEngineService {
 
         // Obtention du flux audio Deezer avec token CDN garanti valide
         String freshPreviewUrl = deezerClientService.getFreshPreviewUrl(track);
+        if (freshPreviewUrl == null || freshPreviewUrl.isBlank()) {
+            log.warn("Aucun flux audio disponible pour trackId={} ({}-{}). Passage à la suivante.",
+                    track.getId(), track.getArtist(), track.getTitle());
+            if (session.hasMoreRounds()) {
+                session.nextRound();
+                startCurrentRound(gameId);
+            } else {
+                finishMatch(gameId);
+            }
+            return;
+        }
 
         session.setState(SessionState.PLAYING);
         session.setRoundStartTimestamp(System.currentTimeMillis());
@@ -173,17 +184,17 @@ public class GameEngineService {
                 session.cancelScheduledTask();
                 startCurrentRound(gameId);
             } else {
-                // Si le premier joueur est prêt en versus, lancer un délai de secours de 3s au cas où le 2e joueur tarde
+                // Délai de secours de 12s en versus au cas où le 2e joueur a une latence réseau
                 session.setScheduledTask(scheduler.schedule(() -> {
                     GameSession s = getSession(gameId);
                     if (s != null && s.getState() == SessionState.WAITING_READY) {
                         log.info("Délai d'attente du 2ème joueur écoulé pour gameId={}. Démarrage automatique de la 1ère manche.", gameId);
                         startCurrentRound(gameId);
                     }
-                }, 3, TimeUnit.SECONDS));
+                }, 12, TimeUnit.SECONDS));
             }
         } else if (session.getState() == SessionState.PLAYING) {
-            // Joueur reconnecté ou en retard : resynchroniser immédiatement l'état audio et manche
+            // Joueur reconnecté ou en retard : resynchroniser sans perturber le joueur actif
             syncSessionStateForPlayer(gameId, playerId);
         }
     }
@@ -200,7 +211,8 @@ public class GameEngineService {
         long remaining = Math.max(0, session.getRoundRemainingDurationMs() - elapsed);
 
         Map<String, Object> syncPayload = Map.ofEntries(
-                entry("event", "ROUND_START"),
+                entry("event", "ROUND_RESYNC"),
+                entry("targetPlayerId", playerId != null ? playerId.toString() : ""),
                 entry("gameId", gameId),
                 entry("player1Id", session.getPlayer1Id() != null ? session.getPlayer1Id().toString() : ""),
                 entry("player2Id", session.getPlayer2Id() != null ? session.getPlayer2Id().toString() : ""),
@@ -209,7 +221,7 @@ public class GameEngineService {
                 entry("roundId", session.getCurrentRoundId()),
                 entry("roundNumber", session.getCurrentRoundIndex() + 1),
                 entry("totalRounds", session.getPlaylist().size()),
-                entry("previewUrl", freshPreviewUrl),
+                entry("previewUrl", freshPreviewUrl != null ? freshPreviewUrl : ""),
                 entry("durationSeconds", (int) Math.max(1, remaining / 1000)),
                 entry("serverTimestamp", System.currentTimeMillis())
         );

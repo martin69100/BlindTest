@@ -20,6 +20,16 @@ export const SecureAudioPlayer: React.FC = () => {
 
   const [autoplayBlocked, setAutoplayBlocked] = useState<boolean>(false);
   const [audioError, setAudioError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+
+  const handleManualRetry = () => {
+    setAudioError(null);
+    setRetryCount(0);
+    if (audioRef.current) {
+      audioRef.current.load();
+      tryPlay();
+    }
+  };
 
   const isMutedRef = useRef(isMuted);
   isMutedRef.current = isMuted;
@@ -80,6 +90,7 @@ export const SecureAudioPlayer: React.FC = () => {
     if (audioUrl) {
       setAudioError(null);
       setAutoplayBlocked(false);
+      setRetryCount(0);
       audio.currentTime = 0;
       audio.load();
 
@@ -141,7 +152,17 @@ export const SecureAudioPlayer: React.FC = () => {
           const err = (e.currentTarget as HTMLAudioElement).error;
           console.warn("Erreur de flux audio :", err, "URL :", audioUrl);
           if (audioUrl) {
-            setAudioError("Flux audio temporairement indisponible");
+            if (retryCount < 2) {
+              setRetryCount((prev) => prev + 1);
+              setTimeout(() => {
+                if (audioRef.current && phase === 'PLAYING') {
+                  audioRef.current.load();
+                  tryPlay();
+                }
+              }, 600);
+            } else {
+              setAudioError("Flux audio temporairement indisponible");
+            }
           }
         }}
       />
@@ -158,12 +179,16 @@ export const SecureAudioPlayer: React.FC = () => {
         </button>
       )}
 
-      {/* Erreur de lecture */}
+      {/* Erreur de lecture avec action de rechargement */}
       {audioError && !autoplayBlocked && (
-        <div className="flex items-center space-x-1 text-rose-400 text-[10px] font-semibold" title={audioError}>
+        <button
+          onClick={handleManualRetry}
+          className="flex items-center space-x-1 text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 px-2 py-0.5 rounded-lg border border-rose-500/30 text-[10px] font-semibold cursor-pointer transition-colors"
+          title="Cliquez pour réessayer la lecture du flux audio"
+        >
           <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-          <span className="hidden sm:inline">Erreur flux</span>
-        </div>
+          <span className="hidden sm:inline">Réessayer son</span>
+        </button>
       )}
 
       {/* Visualiseur d'ondes compact animé */}
@@ -199,6 +224,9 @@ export const SecureAudioPlayer: React.FC = () => {
           step="0.05"
           value={isMuted ? 0 : volume}
           onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+          onMouseUp={(e) => (e.target as HTMLElement).blur()}
+          onTouchEnd={(e) => (e.target as HTMLElement).blur()}
+          onKeyUp={(e) => (e.target as HTMLElement).blur()}
           className="w-16 sm:w-20 h-1 bg-slate-800 group-hover:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-brand-500 transition-colors"
           title={`Volume : ${Math.round(volume * 100)}%`}
         />

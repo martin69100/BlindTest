@@ -1,6 +1,10 @@
 package com.blindtest.game.fuzzymatch;
 
 import java.text.Normalizer;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class StringNormalizer {
@@ -83,5 +87,85 @@ public final class StringNormalizer {
         if (s == null) return "";
         String withoutConj = s.replaceAll("(?i)\\b(et|and)\\b", "");
         return stripSpaces(withoutConj);
+    }
+
+    // Regex pour extraire les artistes en featuring entre parenthèses ou crochets : (feat. Sia) ou [ft. Rihanna]
+    private static final Pattern FEAT_PAREN_PATTERN = Pattern.compile(
+            "(?i)[(\\[]\\s*(?:feat\\.?|ft\\.?|featuring|with|avec)\\s+([^)\\]]+)[)\\]]"
+    );
+
+    // Regex pour extraire les artistes en featuring hors parenthèses : "David Guetta feat. Sia"
+    private static final Pattern FEAT_INLINE_PATTERN = Pattern.compile(
+            "(?i)(?:^|\\s+)(?:feat\\.?|ft\\.?|featuring|with|avec)\\s+(.+)$"
+    );
+
+    // Regex pour découper une liste de collaborateurs ("Sia & Akon", "Pharrell Williams, Nile Rodgers")
+    private static final Pattern COLLAB_SPLIT_PATTERN = Pattern.compile(
+            "(?i)\\s*(?:&|\\band\\b|\\bet\\b|,|\\bx\\b|/)\\s*"
+    );
+
+    /**
+     * Extrait tous les artistes individuels présents dans une chaîne d'artiste ou de titre.
+     * Ex: "David Guetta feat. Sia" -> ["Sia"],
+     *     "Titanium (feat. Sia)" -> ["Sia"],
+     *     "Major Lazer & DJ Snake feat. MØ" -> ["Major Lazer", "DJ Snake", "MØ"],
+     *     "Get Lucky (feat. Pharrell Williams & Nile Rodgers)" -> ["Pharrell Williams", "Nile Rodgers"]
+     */
+    public static Set<String> extractFeaturedArtists(String input) {
+        if (input == null || input.isBlank()) {
+            return Collections.emptySet();
+        }
+        Set<String> artists = new LinkedHashSet<>();
+
+        // 1. Détection dans les parenthèses / crochets (ex: "Titanium (feat. Sia)")
+        Matcher mParen = FEAT_PAREN_PATTERN.matcher(input);
+        while (mParen.find()) {
+            String featBlock = mParen.group(1);
+            addSplitArtists(featBlock, artists);
+        }
+
+        // 2. Détection hors parenthèses (ex: "David Guetta feat. Sia")
+        Matcher mInline = FEAT_INLINE_PATTERN.matcher(input);
+        if (mInline.find()) {
+            String featBlock = mInline.group(1);
+            featBlock = featBlock.replaceAll("[)\\]]", "");
+            addSplitArtists(featBlock, artists);
+        }
+
+        // 3. Détection des collaborations par conjonction (&, x, and, et, virgule)
+        // ex: "David Guetta & Sia" -> "David Guetta", "Sia"
+        if (input.contains("&") || input.contains(" x ") || input.contains(" X ") || input.contains(",")) {
+            String[] parts = COLLAB_SPLIT_PATTERN.split(input);
+            if (parts.length > 1) {
+                for (String p : parts) {
+                    String clean = p.replaceAll("(?i)[(\\[].*?[)\\]]", "")
+                            .replaceAll("(?i)\\s+(?:feat\\.?|ft\\.?|featuring|with|avec)\\s+.*$", "")
+                            .trim();
+                    if (clean.length() >= 2 && !isStopOrNoise(clean)) {
+                        artists.add(clean);
+                    }
+                }
+            }
+        }
+
+        return artists;
+    }
+
+    private static void addSplitArtists(String featBlock, Set<String> artists) {
+        if (featBlock == null || featBlock.isBlank()) return;
+        String[] parts = COLLAB_SPLIT_PATTERN.split(featBlock);
+        for (String p : parts) {
+            String clean = p.replaceAll("(?i)[(\\[].*?[)\\]]", "").trim();
+            if (clean.length() >= 2 && !isStopOrNoise(clean)) {
+                artists.add(clean);
+            }
+        }
+    }
+
+    private static boolean isStopOrNoise(String word) {
+        String lower = word.toLowerCase();
+        return lower.equals("remix") || lower.equals("remaster") || lower.equals("remastered")
+                || lower.equals("live") || lower.equals("radio edit") || lower.equals("version")
+                || lower.equals("feat") || lower.equals("ft");
     }
 }

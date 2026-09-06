@@ -4,6 +4,8 @@ import com.blindtest.game.entity.MatchRound.GuessType;
 import com.blindtest.track.entity.Track;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -63,11 +65,32 @@ public class LevenshteinMatcher {
         if (!artistAlreadyDiscovered) {
             String artist = (track.getArtist() != null) ? track.getArtist() : track.getNormalizedArtist();
             String normalizedArtist = StringNormalizer.normalize(artist);
-            MatchCandidate artistMatch = checkCandidate(normalizedGuess, normalizedArtist, track.getAltArtists(), true);
+
+            // Collecter l'ensemble des artistes alternatifs et participants (feat, collaboration)
+            Set<String> allArtistAlternatives = new LinkedHashSet<>();
+            if (track.getAltArtists() != null) {
+                allArtistAlternatives.addAll(track.getAltArtists());
+            }
+
+            // Extraire les artistes en feat / collaboration depuis l'artiste (ex: "David Guetta feat. Sia" -> "Sia")
+            allArtistAlternatives.addAll(StringNormalizer.extractFeaturedArtists(track.getArtist()));
+
+            // Extraire les artistes en feat depuis le titre officiel (ex: "Titanium (feat. Sia)" -> "Sia")
+            allArtistAlternatives.addAll(StringNormalizer.extractFeaturedArtists(track.getTitle()));
+            if (track.getAltTitles() != null) {
+                for (String altTitle : track.getAltTitles()) {
+                    allArtistAlternatives.addAll(StringNormalizer.extractFeaturedArtists(altTitle));
+                }
+            }
+
+            MatchCandidate artistMatch = checkCandidate(normalizedGuess, normalizedArtist, new ArrayList<>(allArtistAlternatives), true);
             if (artistMatch.matched()) {
+                String matchedDisplayName = (artistMatch.matchedName() != null && !artistMatch.matchedName().isBlank())
+                        ? artistMatch.matchedName()
+                        : track.getArtist();
                 return VerificationResult.match(
                         GuessType.ARTIST,
-                        track.getArtist(),
+                        matchedDisplayName,
                         artistMatch.distance(),
                         artistMatch.similarity()
                 );
@@ -84,23 +107,26 @@ public class LevenshteinMatcher {
             return primary;
         }
 
-        // Test par mot-clé isolé, sous-phrase ou acronyme
+        // Test par mot-clé isolé, sous-phrase ou acronyme sur la cible principale
         MatchCandidate tokenMatch = checkTokenOrSubphraseMatch(normalizedGuess, normalizedTarget, isArtist);
         if (tokenMatch.matched()) {
             return tokenMatch;
         }
 
-        // Test sur les variantes alternatives si renseignées
+        // Test sur les variantes alternatives si renseignées (alias, feats, etc.)
         if (alternatives != null) {
             for (String alt : alternatives) {
+                if (alt == null || alt.isBlank()) continue;
                 String normalizedAlt = StringNormalizer.normalize(alt);
+                if (normalizedAlt.isBlank()) continue;
+
                 MatchCandidate candidate = computeMatch(normalizedGuess, normalizedAlt);
                 if (candidate.matched()) {
-                    return candidate;
+                    return new MatchCandidate(true, candidate.distance(), candidate.similarity(), alt);
                 }
                 MatchCandidate altToken = checkTokenOrSubphraseMatch(normalizedGuess, normalizedAlt, isArtist);
                 if (altToken.matched()) {
-                    return altToken;
+                    return new MatchCandidate(true, altToken.distance(), altToken.similarity(), alt);
                 }
             }
         }
@@ -308,5 +334,9 @@ public class LevenshteinMatcher {
         return dp[lenA][lenB];
     }
 
-    public record MatchCandidate(boolean matched, int distance, double similarity) {}
+    public record MatchCandidate(boolean matched, int distance, double similarity, String matchedName) {
+        public MatchCandidate(boolean matched, int distance, double similarity) {
+            this(matched, distance, similarity, null);
+        }
+    }
 }

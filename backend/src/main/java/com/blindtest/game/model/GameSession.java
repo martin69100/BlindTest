@@ -107,7 +107,6 @@ public class GameSession {
         cancelScheduledTask();
         this.currentRoundIndex++;
         this.currentRoundId = UUID.randomUUID();
-        this.state = SessionState.PLAYING;
         this.titleFound = false;
         this.artistFound = false;
         this.firstFoundType = GuessType.NONE;

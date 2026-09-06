@@ -4,7 +4,7 @@ import { useGameStore } from '../store/useGameStore';
 import { wsService } from '../services/websocket';
 
 export const RoundRevealCard: React.FC = () => {
-  const { gameId, phase, revealedTrack, roundNumber, totalRounds, isLastRound } = useGameStore();
+  const { gameId, phase, revealedTrack, roundNumber, totalRounds, isLastRound, isSolo } = useGameStore();
   const [secondsRemaining, setSecondsRemaining] = useState(5);
 
   const handleNext = () => {
@@ -82,7 +82,12 @@ export const RoundRevealCard: React.FC = () => {
 
         <button
           onClick={handleNext}
-          className="w-full bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white py-3 px-6 rounded-xl font-bold flex items-center justify-center space-x-2 shadow-lg shadow-brand-600/30 transition-transform active:scale-98 cursor-pointer"
+          disabled={!isSolo && !isLastRound}
+          className={`w-full bg-gradient-to-r from-brand-600 to-indigo-600 text-white py-3 px-6 rounded-xl font-bold flex items-center justify-center space-x-2 shadow-lg transition-transform ${
+            isSolo || isLastRound
+              ? 'hover:from-brand-500 hover:to-indigo-500 cursor-pointer active:scale-98 shadow-brand-600/30'
+              : 'opacity-90 cursor-default'
+          }`}
         >
           {isLastRound ? (
             <>
@@ -91,7 +96,7 @@ export const RoundRevealCard: React.FC = () => {
             </>
           ) : (
             <>
-              <span>Manche suivante ({secondsRemaining}s)</span>
+              <span>{isSolo ? `Passer à la suite (${secondsRemaining}s)` : `Manche suivante dans ${secondsRemaining}s`}</span>
               <ArrowRight className="w-5 h-5" />
             </>
           )}

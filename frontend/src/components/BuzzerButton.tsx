@@ -18,13 +18,28 @@ export const BuzzerButton: React.FC = () => {
     wsService.sendBuzz(gameId, user.id);
   }, [canBuzz, gameId, user]);
 
+  // Dégagement du focus pour éviter que la barre d'espace n'active un autre bouton
+  useEffect(() => {
+    if (canBuzz) {
+      if (document.activeElement && ['BUTTON', 'INPUT'].includes(document.activeElement.tagName)) {
+        (document.activeElement as HTMLElement).blur();
+      }
+    }
+  }, [canBuzz]);
+
   // Écoute clavier (Touche Entrée ou Espace)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ne pas déclencher si l'utilisateur est déjà en train de taper dans un champ de texte
-      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) {
+      // Ne pas déclencher si l'utilisateur est dans un vrai champ de texte (mais autoriser si slider de volume)
+      const target = e.target as HTMLElement;
+      const isTextInput =
+        (target.tagName === 'INPUT' && (target as HTMLInputElement).type !== 'range') ||
+        target.tagName === 'TEXTAREA';
+
+      if (isTextInput || e.repeat) {
         return;
       }
+
       if (e.code === 'Enter' || e.code === 'Space') {
         e.preventDefault();
         triggerBuzz();

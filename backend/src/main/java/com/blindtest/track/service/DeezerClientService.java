@@ -76,6 +76,40 @@ public class DeezerClientService {
                     track.getId(), track.getDeezerId(), e.getMessage());
         }
 
+        // 3. Recherche de secours sur Deezer si le trackId spécifique n'a plus de preview valide
+        try {
+            RestClient restClient = RestClient.builder()
+                    .baseUrl(deezerBaseUrl)
+                    .build();
+
+            String queryParam = String.format("artist:\"%s\" track:\"%s\"", track.getArtist(), track.getTitle());
+            DeezerResponseDto response = restClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/search")
+                            .queryParam("q", queryParam)
+                            .queryParam("limit", 5)
+                            .build())
+                    .retrieve()
+                    .body(DeezerResponseDto.class);
+
+            if (response != null && response.getData() != null) {
+                for (DeezerResponseDto.DeezerTrackItem fallbackItem : response.getData()) {
+                    if (fallbackItem.getPreview() != null && !fallbackItem.getPreview().isBlank()) {
+                        String freshUrl = fallbackItem.getPreview();
+                        previewCache.put(fallbackItem.getId(), new CachedPreview(freshUrl, System.currentTimeMillis() + 45 * 60 * 1000L));
+                        track.setDeezerId(fallbackItem.getId());
+                        track.setPreviewUrl(freshUrl);
+                        trackRepository.save(track);
+                        log.info("Lien Deezer de secours trouvé pour trackId={} (titre: '{}') : {}", track.getId(), track.getTitle(), freshUrl);
+                        return freshUrl;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Recherche de secours Deezer échouée pour trackId={} (titre: '{}') : {}",
+                    track.getId(), track.getTitle(), e.getMessage());
+        }
+
         return track.getPreviewUrl();
     }
 

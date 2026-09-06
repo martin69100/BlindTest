@@ -10,7 +10,7 @@ import { authService } from './services/api';
 
 export const App: React.FC = () => {
   const { gameId, phase, onRoundStart, onPlayerBuzzed, onFirstAnswerCorrect, onStealOpen, onRoundEnd, onMatchFinished } = useGameStore();
-  const { setUser } = useAuthStore();
+  const { user, setUser } = useAuthStore();
   const [isAuthenticating, setIsAuthenticating] = useState(() => {
     return window.location.pathname.includes('/auth/callback') || window.location.pathname.includes('/auth/classback');
   });
@@ -81,6 +81,12 @@ export const App: React.FC = () => {
       switch (payload.event) {
         case 'ROUND_START':
           onRoundStart(payload);
+          break;
+        case 'ROUND_RESYNC':
+          // Resynchroniser uniquement si on est encore en attente ou si on est le joueur ciblé
+          if (phase === 'WAITING' || (user && payload.targetPlayerId === user.id)) {
+            onRoundStart(payload);
+          }
           break;
         case 'PLAYER_BUZZED':
           onPlayerBuzzed(payload);
