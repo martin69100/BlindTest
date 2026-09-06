@@ -5,7 +5,18 @@ import { useGameStore } from '../store/useGameStore';
 import { useAuthStore } from '../store/useAuthStore';
 
 export const MatchVictoryModal: React.FC = () => {
-  const { phase, matchResult, player1Score, player2Score, resetGame, isSolo, totalRounds } = useGameStore();
+  const {
+    phase,
+    matchResult,
+    player2Id,
+    player1Name,
+    player2Name,
+    player1Score,
+    player2Score,
+    resetGame,
+    isSolo,
+    totalRounds,
+  } = useGameStore();
   const { user, refreshProfile } = useAuthStore();
 
   useEffect(() => {
@@ -21,15 +32,24 @@ export const MatchVictoryModal: React.FC = () => {
 
   if (phase !== 'FINISHED') return null;
 
+  const isPlayer2 = !isSolo && Boolean(user && player2Id && user.id === player2Id);
+  const myScore = isPlayer2 ? player2Score : player1Score;
+  const opponentScore = isPlayer2 ? player1Score : player2Score;
+  const opponentDisplayName = isSolo
+    ? 'Adversaire'
+    : (isPlayer2 ? player1Name : player2Name) || 'Adversaire';
+
   const isForfeit = matchResult?.forfeit === true;
   const isWinner = matchResult && (
     (matchResult.winnerId === user?.id) ||
-    (user && player1Score > player2Score)
+    (Boolean(user) && myScore > opponentScore)
   );
-  const isDraw = player1Score === player2Score;
+  const isDraw = myScore === opponentScore;
 
-  const eloDelta = matchResult?.player1EloChange || 0;
-  const displayScore = player1Score ?? 0;
+  const eloDelta = isPlayer2
+    ? (matchResult?.player2EloChange ?? 0)
+    : (matchResult?.player1EloChange ?? 0);
+  const displayScore = myScore ?? 0;
   const maxScore = totalRounds * 2;
 
   return (
@@ -96,9 +116,11 @@ export const MatchVictoryModal: React.FC = () => {
             <>
               <div className="h-10 w-px bg-slate-800" />
               <div>
-                <p className="text-xs text-slate-400 font-semibold mb-1">Adversaire</p>
+                <p className="text-xs text-slate-400 font-semibold mb-1 truncate max-w-[120px]">
+                  {opponentDisplayName}
+                </p>
                 <p className="text-3xl font-black text-slate-400">
-                  {player2Score ?? 0} <span className="text-lg font-bold text-slate-500">pts</span>
+                  {opponentScore ?? 0} <span className="text-lg font-bold text-slate-500">pts</span>
                 </p>
               </div>
             </>

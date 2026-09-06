@@ -44,6 +44,10 @@ export interface RoundStartEvent {
   previewUrl: string;
   durationSeconds: number;
   serverTimestamp: number;
+  player1Id?: string;
+  player2Id?: string;
+  player1Name?: string;
+  player2Name?: string;
 }
 
 export interface PlayerBuzzedEvent {
@@ -70,6 +74,13 @@ export interface StealOpenEvent {
   event: 'ANSWER_FAILED_STEAL_OPEN';
   failedPlayerId: string;
   remainingAudioMs: number;
+  titleFound?: boolean;
+  artistFound?: boolean;
+  firstFoundType?: string;
+  currentScores?: {
+    player1: number;
+    player2: number;
+  };
 }
 
 export interface RoundEndEvent {
@@ -81,6 +92,10 @@ export interface RoundEndEvent {
     player2: number;
   };
   isLastRound: boolean;
+  player1Id?: string;
+  player2Id?: string;
+  player1Name?: string;
+  player2Name?: string;
 }
 
 export interface MatchFinishedEvent {
@@ -94,4 +109,8 @@ export interface MatchFinishedEvent {
   player2EloChange?: number;
   player1NewElo?: number;
   player2NewElo?: number;
+  player1Id?: string;
+  player2Id?: string;
+  player1Name?: string;
+  player2Name?: string;
 }

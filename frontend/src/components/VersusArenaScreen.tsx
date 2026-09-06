@@ -15,6 +15,9 @@ export const VersusArenaScreen: React.FC = () => {
     phase,
     roundNumber,
     totalRounds,
+    player2Id,
+    player1Name,
+    player2Name,
     player1Score,
     player2Score,
     isSolo,
@@ -22,6 +25,13 @@ export const VersusArenaScreen: React.FC = () => {
     resetGame,
   } = useGameStore();
   const { user } = useAuthStore();
+
+  const isPlayer2 = !isSolo && Boolean(user && player2Id && user.id === player2Id);
+  const myScore = isPlayer2 ? player2Score : player1Score;
+  const opponentScore = isPlayer2 ? player1Score : player2Score;
+  const opponentDisplayName = isSolo
+    ? 'Score Max'
+    : (isPlayer2 ? player1Name : player2Name) || 'Adversaire';
 
   const [readySent, setReadySent] = useState(false);
   const [audioProgress, setAudioProgress] = useState(100);
@@ -171,7 +181,7 @@ export const VersusArenaScreen: React.FC = () => {
             </h4>
           </div>
           <div className="text-2xl sm:text-3xl font-black text-brand-400 bg-brand-500/10 px-4 py-1.5 rounded-xl border border-brand-500/30">
-            {player1Score}
+            {myScore}
           </div>
         </div>
 
@@ -182,11 +192,11 @@ export const VersusArenaScreen: React.FC = () => {
               {isSolo ? 'Objectif' : 'Adversaire'}
             </p>
             <h4 className="text-sm sm:text-base font-black text-slate-300 truncate max-w-[120px]">
-              {isSolo ? 'Score Max' : 'Adversaire'}
+              {opponentDisplayName}
             </h4>
           </div>
           <div className="text-2xl sm:text-3xl font-black text-slate-400 bg-dark-800 px-4 py-1.5 rounded-xl border border-slate-700">
-            {isSolo ? totalRounds * 2 : player2Score}
+            {isSolo ? totalRounds * 2 : opponentScore}
           </div>
         </div>
       </div>
@@ -200,18 +210,20 @@ export const VersusArenaScreen: React.FC = () => {
         ) : (
           <div className="flex flex-col items-center justify-center space-y-4">
             <BuzzerButton />
-            <button
-              onClick={() => {
-                if (gameId && user) {
-                  wsService.sendSkipRound(gameId, user.id);
-                }
-              }}
-              className="flex items-center space-x-2 text-xs font-bold text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 px-5 py-2.5 rounded-full transition-all shadow-md active:scale-95 cursor-pointer mt-2"
-              title="Passer ce morceau (0 point) et afficher immédiatement la solution"
-            >
-              <SkipForward className="w-3.5 h-3.5" />
-              <span>Passer ce morceau (afficher la réponse)</span>
-            </button>
+            {isSolo && (
+              <button
+                onClick={() => {
+                  if (gameId && user) {
+                    wsService.sendSkipRound(gameId, user.id);
+                  }
+                }}
+                className="flex items-center space-x-2 text-xs font-bold text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 px-5 py-2.5 rounded-full transition-all shadow-md active:scale-95 cursor-pointer mt-2"
+                title="Passer ce morceau (0 point) et afficher immédiatement la solution"
+              >
+                <SkipForward className="w-3.5 h-3.5" />
+                <span>Passer ce morceau (afficher la réponse)</span>
+              </button>
+            )}
           </div>
         )}
       </div>

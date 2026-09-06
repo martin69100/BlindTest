@@ -41,7 +41,14 @@ export const LobbyScreen: React.FC = () => {
     const sub = wsService.subscribeToMatchmaking(user.id, (payload) => {
       if (payload.event === 'MATCH_FOUND') {
         setIsSearchingMatch(false);
-        initGame(payload.gameId, false);
+        initGame(
+          payload.gameId,
+          false,
+          payload.player1Id,
+          payload.player2Id,
+          payload.player1Name,
+          payload.player2Name
+        );
       }
     });
 
@@ -64,7 +71,7 @@ export const LobbyScreen: React.FC = () => {
     if (!user) return;
     try {
       const res = await soloService.startSession(user.id, selectedThemeId || undefined);
-      initGame(res.gameId, true);
+      initGame(res.gameId, true, user.id, undefined, user.displayName);
     } catch (e) {
       console.error("Erreur lors du démarrage solo :", e);
     }

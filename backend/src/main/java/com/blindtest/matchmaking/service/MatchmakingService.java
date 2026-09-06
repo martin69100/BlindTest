@@ -127,10 +127,12 @@ public class MatchmakingService {
                 log.info("MATCH TROUVÉ ! '{}' (ELO {}) vs '{}' (ELO {}) [diff={} | gameId={}]",
                         t1.displayName(), t1.elo(), bestMatch.displayName(), bestMatch.elo(), smallestEloDiff, session.getGameId());
 
-                // Notifier les deux joueurs via WebSocket
+                // Notifier les deux joueurs via WebSocket avec les identifiants complets
                 Map<String, Object> matchNotification = Map.of(
                         "event", "MATCH_FOUND",
                         "gameId", session.getGameId(),
+                        "player1Id", t1.userId().toString(),
+                        "player2Id", bestMatch.userId().toString(),
                         "player1Name", t1.displayName(),
                         "player2Name", bestMatch.displayName(),
                         "player1Elo", t1.elo(),

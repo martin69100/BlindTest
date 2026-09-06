@@ -25,8 +25,13 @@ interface GameState {
   firstFoundName: string | null;
   inputTimeoutSeconds: number;
   bonusDurationSeconds: number;
+  failedPlayerIds: string[];
 
-  // Scores
+  // Joueurs & Scores
+  player1Id: string | null;
+  player2Id: string | null;
+  player1Name: string | null;
+  player2Name: string | null;
   player1Score: number;
   player2Score: number;
 
@@ -36,7 +41,14 @@ interface GameState {
   matchResult: MatchFinishedEvent | null;
 
   // Actions
-  initGame: (gameId: string, isSolo?: boolean) => void;
+  initGame: (
+    gameId: string,
+    isSolo?: boolean,
+    player1Id?: string,
+    player2Id?: string,
+    player1Name?: string,
+    player2Name?: string
+  ) => void;
   onRoundStart: (event: RoundStartEvent) => void;
   onPlayerBuzzed: (event: PlayerBuzzedEvent) => void;
   onFirstAnswerCorrect: (event: any) => void;
@@ -59,9 +71,14 @@ export const useGameStore = create<GameState>((set) => ({
   buzzerName: null,
   firstFoundType: null,
   firstFoundName: null,
-  inputTimeoutSeconds: 5,
+  inputTimeoutSeconds: 8,
   bonusDurationSeconds: 10,
+  failedPlayerIds: [],
 
+  player1Id: null,
+  player2Id: null,
+  player1Name: null,
+  player2Name: null,
   player1Score: 0,
   player2Score: 0,
 
@@ -69,7 +86,7 @@ export const useGameStore = create<GameState>((set) => ({
   isLastRound: false,
   matchResult: null,
 
-  initGame: (gameId, isSolo = false) => {
+  initGame: (gameId, isSolo = false, player1Id, player2Id, player1Name, player2Name) => {
     set({
       gameId,
       isSolo,
@@ -79,11 +96,16 @@ export const useGameStore = create<GameState>((set) => ({
       player2Score: 0,
       revealedTrack: null,
       matchResult: null,
+      player1Id: player1Id || null,
+      player2Id: player2Id || null,
+      player1Name: player1Name || null,
+      player2Name: player2Name || null,
+      failedPlayerIds: [],
     });
   },
 
   onRoundStart: (event) => {
-    set({
+    set((state) => ({
       phase: 'PLAYING',
       roundNumber: event.roundNumber,
       totalRounds: event.totalRounds,
@@ -94,7 +116,12 @@ export const useGameStore = create<GameState>((set) => ({
       firstFoundType: null,
       firstFoundName: null,
       revealedTrack: null,
-    });
+      failedPlayerIds: [],
+      player1Id: event.player1Id || state.player1Id,
+      player2Id: event.player2Id || state.player2Id,
+      player1Name: event.player1Name || state.player1Name,
+      player2Name: event.player2Name || state.player2Name,
+    }));
   },
 
   onPlayerBuzzed: (event) => {
@@ -119,22 +146,36 @@ export const useGameStore = create<GameState>((set) => ({
   },
 
   onStealOpen: (event) => {
-    set({
+    set((state) => ({
       phase: 'PLAYING',
       buzzerPlayerId: null,
       buzzerName: null,
       remainingAudioMs: event.remainingAudioMs,
-    });
+      failedPlayerIds: state.failedPlayerIds.includes(event.failedPlayerId)
+        ? state.failedPlayerIds
+        : [...state.failedPlayerIds, event.failedPlayerId],
+      ...(event.currentScores
+        ? {
+            player1Score: event.currentScores.player1,
+            player2Score: event.currentScores.player2,
+          }
+        : {}),
+      ...(event.firstFoundType ? { firstFoundType: event.firstFoundType } : {}),
+    }));
   },
 
   onRoundEnd: (event) => {
-    set({
+    set((state) => ({
       phase: 'REVEAL',
       revealedTrack: event.track,
       player1Score: event.scores.player1,
       player2Score: event.scores.player2,
       isLastRound: event.isLastRound,
-    });
+      player1Id: event.player1Id || state.player1Id,
+      player2Id: event.player2Id || state.player2Id,
+      player1Name: event.player1Name || state.player1Name,
+      player2Name: event.player2Name || state.player2Name,
+    }));
   },
 
   onMatchFinished: (event) => {
@@ -146,6 +187,10 @@ export const useGameStore = create<GameState>((set) => ({
         matchResult: event,
         player1Score: p1,
         player2Score: p2,
+        player1Id: event.player1Id || state.player1Id,
+        player2Id: event.player2Id || state.player2Id,
+        player1Name: event.player1Name || state.player1Name,
+        player2Name: event.player2Name || state.player2Name,
       };
     });
   },
@@ -157,8 +202,16 @@ export const useGameStore = create<GameState>((set) => ({
       roundNumber: 0,
       audioUrl: null,
       buzzerPlayerId: null,
+      buzzerName: null,
+      firstFoundType: null,
+      firstFoundName: null,
       revealedTrack: null,
       matchResult: null,
+      player1Id: null,
+      player2Id: null,
+      player1Name: null,
+      player2Name: null,
+      failedPlayerIds: [],
       player1Score: 0,
       player2Score: 0,
     });

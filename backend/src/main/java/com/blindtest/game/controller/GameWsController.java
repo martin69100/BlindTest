@@ -31,11 +31,7 @@ public class GameWsController {
     @MessageMapping("/game/{gameId}/ready")
     public void onPlayerReady(@DestinationVariable UUID gameId, @Payload GameActionDto dto) {
         log.info("Joueur {} prêt pour la partie {}", dto.getPlayerId(), gameId);
-        GameSession session = gameEngineService.getSession(gameId);
-        if (session != null && session.getState() == GameSession.SessionState.WAITING_READY) {
-            // Lancer la première manche
-            gameEngineService.startCurrentRound(gameId);
-        }
+        gameEngineService.handlePlayerReady(gameId, dto.getPlayerId());
     }
 
     /**

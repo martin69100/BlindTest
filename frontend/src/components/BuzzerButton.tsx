@@ -5,12 +5,13 @@ import { useAuthStore } from '../store/useAuthStore';
 import { wsService } from '../services/websocket';
 
 export const BuzzerButton: React.FC = () => {
-  const { gameId, phase, buzzerPlayerId } = useGameStore();
+  const { gameId, phase, buzzerPlayerId, failedPlayerIds } = useGameStore();
   const { user } = useAuthStore();
 
   const isMyBuzz = user && buzzerPlayerId === user.id;
   const isSomeoneElseBuzz = buzzerPlayerId && (!user || buzzerPlayerId !== user.id);
-  const canBuzz = phase === 'PLAYING';
+  const hasAlreadyAttempted = Boolean(user && failedPlayerIds?.includes(user.id));
+  const canBuzz = phase === 'PLAYING' && !hasAlreadyAttempted;
 
   const triggerBuzz = useCallback(() => {
     if (!canBuzz || !gameId || !user) return;
@@ -44,6 +45,8 @@ export const BuzzerButton: React.FC = () => {
             ? 'bg-gradient-to-b from-rose-500 to-rose-600 hover:from-rose-400 hover:to-rose-500 text-white shadow-2xl shadow-rose-500/50 cursor-pointer animate-pulse hover:scale-105'
             : isMyBuzz
             ? 'bg-emerald-500/20 border-2 border-emerald-500 text-emerald-400 cursor-default'
+            : hasAlreadyAttempted
+            ? 'bg-dark-800 border-2 border-slate-700 text-slate-500 cursor-not-allowed opacity-60'
             : isSomeoneElseBuzz
             ? 'bg-dark-800 border-2 border-slate-700 text-slate-500 cursor-not-allowed opacity-60'
             : 'bg-dark-800 text-slate-600 cursor-not-allowed opacity-50'
@@ -52,13 +55,25 @@ export const BuzzerButton: React.FC = () => {
         <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-full flex flex-col items-center justify-center border-4 border-white/20">
           <Zap className={`w-10 h-10 sm:w-12 sm:h-12 ${canBuzz ? 'animate-bounce' : ''}`} />
           <span className="mt-2 text-xs sm:text-sm font-black tracking-widest uppercase">
-            {isMyBuzz ? 'À VOUS !' : isSomeoneElseBuzz ? 'BLOQUÉ' : 'BUZZ !'}
+            {isMyBuzz
+              ? 'À VOUS !'
+              : hasAlreadyAttempted
+              ? 'MAIN PASSÉE'
+              : isSomeoneElseBuzz
+              ? 'BLOQUÉ'
+              : 'BUZZ !'}
           </span>
         </div>
       </button>
 
       <p className="mt-3 text-xs text-slate-400 font-medium tracking-wide">
-        Appuyez sur <kbd className="px-2 py-0.5 bg-dark-800 border border-slate-700 rounded text-slate-200 font-mono text-[11px]">Entrée</kbd> ou <kbd className="px-2 py-0.5 bg-dark-800 border border-slate-700 rounded text-slate-200 font-mono text-[11px]">Espace</kbd>
+        {hasAlreadyAttempted
+          ? 'Vous avez déjà effectué votre tentative sur ce morceau.'
+          : (
+            <>
+              Appuyez sur <kbd className="px-2 py-0.5 bg-dark-800 border border-slate-700 rounded text-slate-200 font-mono text-[11px]">Entrée</kbd> ou <kbd className="px-2 py-0.5 bg-dark-800 border border-slate-700 rounded text-slate-200 font-mono text-[11px]">Espace</kbd>
+            </>
+          )}
       </p>
     </div>
   );

@@ -21,13 +21,21 @@ export const SecureAudioPlayer: React.FC = () => {
   const [autoplayBlocked, setAutoplayBlocked] = useState<boolean>(false);
   const [audioError, setAudioError] = useState<string | null>(null);
 
-  // Fonction utilitaire pour lancer la lecture avec gestion d'autoplay
+  const isMutedRef = useRef(isMuted);
+  isMutedRef.current = isMuted;
+
+  const volumeRef = useRef(volume);
+  volumeRef.current = volume;
+
+  // Fonction utilitaire pour lancer la lecture avec gestion d'autoplay.
+  // Dépendances vides car on utilise les refs pour le volume, garantissant
+  // qu'aucun changement de slider ne recrée cette fonction.
   const tryPlay = useCallback(() => {
     const audio = audioRef.current;
     if (!audio || !audio.src) return;
 
-    audio.volume = isMuted ? 0 : volume;
-    audio.muted = isMuted;
+    audio.volume = isMutedRef.current ? 0 : volumeRef.current;
+    audio.muted = isMutedRef.current;
 
     const playPromise = audio.play();
     if (playPromise !== undefined) {
@@ -45,7 +53,7 @@ export const SecureAudioPlayer: React.FC = () => {
           }
         });
     }
-  }, [isMuted, volume]);
+  }, []);
 
   // Déblocage automatique au moindre clic ou appui clavier dans la fenêtre
   useEffect(() => {
@@ -64,7 +72,7 @@ export const SecureAudioPlayer: React.FC = () => {
     };
   }, [autoplayBlocked, phase, tryPlay]);
 
-  // Réaction au changement d'URL audio (nouvelle manche)
+  // Réaction STRICTEMENT au changement d'URL audio (nouvelle manche uniquement)
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -81,7 +89,7 @@ export const SecureAudioPlayer: React.FC = () => {
     } else {
       audio.pause();
     }
-  }, [audioUrl, phase, tryPlay]);
+  }, [audioUrl]);
 
   // Réaction au changement de phase de jeu (Buzz, Vol de main, Révélation)
   useEffect(() => {
@@ -95,7 +103,7 @@ export const SecureAudioPlayer: React.FC = () => {
     }
   }, [phase, tryPlay]);
 
-  // Réaction au changement de volume ou mute
+  // Réaction au changement de volume ou mute : met à jour le volume directement sans recharger l'audio
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;

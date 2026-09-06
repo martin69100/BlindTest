@@ -79,7 +79,13 @@ export const AnswerInput: React.FC = () => {
             </span>
           ) : (
             <span className="text-xs font-bold text-rose-400 bg-rose-400/10 px-3 py-1 rounded-full border border-rose-400/30">
-              {isMyTurn ? 'À votre tour ! Entrez le Titre OU l’Artiste' : `${buzzerName} est en train de répondre...`}
+              {isMyTurn
+                ? firstFoundType
+                  ? `À votre tour (Vol de main) ! Trouvez ${firstFoundType === 'TITLE' ? "l'ARTISTE" : 'le TITRE'} !`
+                  : 'À votre tour ! Entrez le Titre OU l’Artiste'
+                : firstFoundType
+                ? `${buzzerName} tente de trouver ${firstFoundType === 'TITLE' ? "l'Artiste" : 'le Titre'} (Vol de main)...`
+                : `${buzzerName} est en train de répondre...`}
             </span>
           )}
         </div>
@@ -91,9 +97,9 @@ export const AnswerInput: React.FC = () => {
         </div>
       </div>
 
-      {isBonus && firstFoundName && (
+      {firstFoundName && (
         <p className="text-xs text-slate-400 mb-3">
-          Déjà validé : <span className="text-emerald-400 font-semibold">{firstFoundName}</span>
+          Déjà validé : <span className="text-emerald-400 font-semibold">{firstFoundName}</span> ({firstFoundType === 'TITLE' ? 'Titre' : 'Artiste'})
         </p>
       )}
 
@@ -106,7 +112,7 @@ export const AnswerInput: React.FC = () => {
             value={guess}
             onChange={(e) => setGuess(e.target.value)}
             placeholder={
-              isBonus
+              firstFoundType
                 ? (firstFoundType === 'TITLE' ? "Nom de l'artiste..." : 'Titre du morceau...')
                 : 'Tapez le titre OU le nom de l’artiste...'
             }
@@ -137,7 +143,11 @@ export const AnswerInput: React.FC = () => {
       ) : (
         <div className="py-4 text-center">
           <p className="text-sm text-slate-400 animate-pulse font-medium">
-            L'adversaire a la main... Soyez prêt si la réponse échoue !
+            {isBonus
+              ? `${buzzerName} tente le bonus (+1 PT)... Soyez prêt à voler la main s'il échoue !`
+              : firstFoundType
+              ? `${buzzerName} tente le point restant (Vol de main)...`
+              : "L'adversaire a la main... Soyez prêt si la réponse échoue !"}
           </p>
         </div>
       )}

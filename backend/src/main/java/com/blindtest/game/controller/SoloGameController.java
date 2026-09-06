@@ -41,6 +41,8 @@ public class SoloGameController {
 
         return ResponseEntity.ok(Map.of(
                 "gameId", session.getGameId(),
+                "player1Id", user.getId().toString(),
+                "player1Name", user.getDisplayName(),
                 "totalRounds", session.getPlaylist().size(),
                 "themeId", request.getThemeId() != null ? request.getThemeId() : "ALL"
         ));

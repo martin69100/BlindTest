@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -60,9 +61,13 @@ public class GameSession {
     @Builder.Default
     private GuessType firstFoundType = GuessType.NONE;
 
+    // Joueurs prêts au démarrage de la partie
+    @Builder.Default
+    private Set<UUID> readyPlayers = ConcurrentHashMap.newKeySet();
+
     // Option A : Vol de main
     @Builder.Default
-    private Set<UUID> playersBuzzedInRound = new HashSet<>();
+    private Set<UUID> playersBuzzedInRound = ConcurrentHashMap.newKeySet();
 
     // Verrou atomique pour concurrence sur le buzzer
     @Builder.Default

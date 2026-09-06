@@ -25,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
+import static java.util.Map.entry;
 
 @Service
 @RequiredArgsConstructor
@@ -46,7 +47,7 @@ public class GameEngineService {
     @Value("${blindtest.game.round-duration-seconds:20}")
     private int roundDurationSeconds;
 
-    @Value("${blindtest.game.first-guess-timeout-seconds:5}")
+    @Value("${blindtest.game.first-guess-timeout-seconds:8}")
     private int firstGuessTimeoutSeconds;
 
     @Value("${blindtest.game.bonus-duration-seconds:10}")
@@ -140,23 +141,84 @@ public class GameEngineService {
             }
         }, roundDurationSeconds, TimeUnit.SECONDS));
 
-        // Anti-triche strict : aucune métadonnée textuelle n'est envoyée
-        Map<String, Object> roundStartPayload = Map.of(
-                "event", "ROUND_START",
-                "gameId", gameId,
-                "roundId", session.getCurrentRoundId(),
-                "roundNumber", session.getCurrentRoundIndex() + 1,
-                "totalRounds", session.getPlaylist().size(),
-                "previewUrl", freshPreviewUrl,
-                "durationSeconds", roundDurationSeconds,
-                "serverTimestamp", System.currentTimeMillis()
+        // Anti-triche strict : aucune métadonnée textuelle secrète n'est envoyée
+        Map<String, Object> roundStartPayload = Map.ofEntries(
+                entry("event", "ROUND_START"),
+                entry("gameId", gameId),
+                entry("player1Id", session.getPlayer1Id() != null ? session.getPlayer1Id().toString() : ""),
+                entry("player2Id", session.getPlayer2Id() != null ? session.getPlayer2Id().toString() : ""),
+                entry("player1Name", session.getPlayer1Name() != null ? session.getPlayer1Name() : ""),
+                entry("player2Name", session.getPlayer2Name() != null ? session.getPlayer2Name() : ""),
+                entry("roundId", session.getCurrentRoundId()),
+                entry("roundNumber", session.getCurrentRoundIndex() + 1),
+                entry("totalRounds", session.getPlaylist().size()),
+                entry("previewUrl", freshPreviewUrl),
+                entry("durationSeconds", roundDurationSeconds),
+                entry("serverTimestamp", System.currentTimeMillis())
         );
 
         messagingTemplate.convertAndSend("/topic/game/" + gameId, roundStartPayload);
     }
 
     /**
-     * Traitement atomique du Buzz d'un joueur et armement du décompte de 5 secondes.
+     * Gestion de la confirmation 'prêt' d'un joueur dans l'arène.
+     */
+    public void handlePlayerReady(UUID gameId, UUID playerId) {
+        GameSession session = getSession(gameId);
+        if (session == null) return;
+
+        if (session.getState() == SessionState.WAITING_READY) {
+            session.getReadyPlayers().add(playerId);
+            if (session.isSolo() || session.getReadyPlayers().size() >= 2) {
+                session.cancelScheduledTask();
+                startCurrentRound(gameId);
+            } else {
+                // Si le premier joueur est prêt en versus, lancer un délai de secours de 3s au cas où le 2e joueur tarde
+                session.setScheduledTask(scheduler.schedule(() -> {
+                    GameSession s = getSession(gameId);
+                    if (s != null && s.getState() == SessionState.WAITING_READY) {
+                        log.info("Délai d'attente du 2ème joueur écoulé pour gameId={}. Démarrage automatique de la 1ère manche.", gameId);
+                        startCurrentRound(gameId);
+                    }
+                }, 3, TimeUnit.SECONDS));
+            }
+        } else if (session.getState() == SessionState.PLAYING) {
+            // Joueur reconnecté ou en retard : resynchroniser immédiatement l'état audio et manche
+            syncSessionStateForPlayer(gameId, playerId);
+        }
+    }
+
+    public void syncSessionStateForPlayer(UUID gameId, UUID playerId) {
+        GameSession session = getSession(gameId);
+        if (session == null || session.getState() == SessionState.FINISHED) return;
+
+        Track track = session.getCurrentTrack();
+        if (track == null) return;
+
+        String freshPreviewUrl = deezerClientService.getFreshPreviewUrl(track);
+        long elapsed = System.currentTimeMillis() - session.getRoundStartTimestamp();
+        long remaining = Math.max(0, session.getRoundRemainingDurationMs() - elapsed);
+
+        Map<String, Object> syncPayload = Map.ofEntries(
+                entry("event", "ROUND_START"),
+                entry("gameId", gameId),
+                entry("player1Id", session.getPlayer1Id() != null ? session.getPlayer1Id().toString() : ""),
+                entry("player2Id", session.getPlayer2Id() != null ? session.getPlayer2Id().toString() : ""),
+                entry("player1Name", session.getPlayer1Name() != null ? session.getPlayer1Name() : ""),
+                entry("player2Name", session.getPlayer2Name() != null ? session.getPlayer2Name() : ""),
+                entry("roundId", session.getCurrentRoundId()),
+                entry("roundNumber", session.getCurrentRoundIndex() + 1),
+                entry("totalRounds", session.getPlaylist().size()),
+                entry("previewUrl", freshPreviewUrl),
+                entry("durationSeconds", (int) Math.max(1, remaining / 1000)),
+                entry("serverTimestamp", System.currentTimeMillis())
+        );
+
+        messagingTemplate.convertAndSend("/topic/game/" + gameId, syncPayload);
+    }
+
+    /**
+     * Traitement atomique du Buzz d'un joueur et armement du décompte de saisie.
      */
     public boolean handleBuzz(UUID gameId, UUID playerId) {
         GameSession session = getSession(gameId);
@@ -164,7 +226,7 @@ public class GameEngineService {
             return false;
         }
 
-        // Si le joueur a déjà buzzé et échoué lors de cette manche (Option A), il ne peut plus buzzer
+        // Si le joueur a déjà buzzé et terminé sa tentative lors de cette manche, il ne peut plus buzzer
         if (session.getPlayersBuzzedInRound().contains(playerId)) {
             return false;
         }
@@ -176,16 +238,16 @@ public class GameEngineService {
             session.setCurrentBuzzerPlayerId(playerId);
             session.setBuzzTimestamp(System.currentTimeMillis());
 
-            // Calcul du temps restant pour une reprise éventuelle
+            // Calcul du temps audio restant pour une reprise éventuelle
             long elapsed = session.getBuzzTimestamp() - session.getRoundStartTimestamp();
             long remaining = Math.max(0, session.getRoundRemainingDurationMs() - elapsed);
             session.setRoundRemainingDurationMs(remaining);
 
-            // Armer le décompte automatique de saisie (5 secondes max)
+            // Armer le décompte automatique de saisie
             session.setScheduledTask(scheduler.schedule(() -> {
                 GameSession s = getSession(gameId);
                 if (s != null && s.getState() == SessionState.BUZZED && playerId.equals(s.getCurrentBuzzerPlayerId())) {
-                    log.info("Expiration du délai de saisie (5s) pour joueur={}. Traitement échec.", playerId);
+                    log.info("Expiration du délai de saisie ({}s) pour joueur={}. Traitement échec.", firstGuessTimeoutSeconds, playerId);
                     handleAnswer(gameId, playerId, ""); // Réponse vide = échec
                 }
             }, firstGuessTimeoutSeconds, TimeUnit.SECONDS));
@@ -213,10 +275,10 @@ public class GameEngineService {
         if (session == null || session.getState() != SessionState.BUZZED) return;
         if (!playerId.equals(session.getCurrentBuzzerPlayerId())) return;
 
-        session.cancelScheduledTask(); // Annuler le timer de saisie des 5s
+        session.cancelScheduledTask(); // Annuler le timer de saisie
 
         long elapsed = System.currentTimeMillis() - session.getBuzzTimestamp();
-        boolean timeout = elapsed > (firstGuessTimeoutSeconds * 1000L + 800); // grâce réseau
+        boolean timeout = elapsed > (firstGuessTimeoutSeconds * 1000L + 1200); // grâce réseau
 
         Track track = session.getCurrentTrack();
         VerificationResult result = (!timeout && rawGuess != null && !rawGuess.isBlank()) ?
@@ -224,25 +286,35 @@ public class GameEngineService {
                 : VerificationResult.notMatched();
 
         if (result.matched()) {
-            // Première réponse validée (+1 point)
+            // Réponse validée (+1 point)
             session.addScore(playerId, 1);
             if (result.guessType() == GuessType.TITLE) {
                 session.setTitleFound(true);
             } else {
                 session.setArtistFound(true);
             }
-            session.setFirstFoundType(result.guessType());
-            session.setState(SessionState.BONUS_WINDOW);
+            if (session.getFirstFoundType() == GuessType.NONE) {
+                session.setFirstFoundType(result.guessType());
+            }
 
             // Mettre à jour les stats par thème en base
             updateThemeStats(playerId, session.getThemeId(), true, false);
 
-            // Armer le timer automatique de 10 secondes pour le bonus
+            // Si les deux éléments (titre ET artiste) sont désormais validés (ex: adversaire avait trouvé l'autre) :
+            if (session.isTitleFound() && session.isArtistFound()) {
+                log.info("Titre et Artiste trouvés pour gameId={} ! Clôture de la manche.", gameId);
+                endRound(gameId);
+                return;
+            }
+
+            // Un seul élément trouvé : le joueur entre en fenêtre bonus (10s) pour le 2ème élément
+            session.setState(SessionState.BONUS_WINDOW);
+
             session.setScheduledTask(scheduler.schedule(() -> {
                 GameSession s = getSession(gameId);
                 if (s != null && s.getState() == SessionState.BONUS_WINDOW) {
-                    log.info("Expiration du bonus (10s) pour gameId={}. Clôture de manche.", gameId);
-                    endRound(gameId);
+                    log.info("Expiration du bonus (10s) pour gameId={}. La main passe si possible.", gameId);
+                    handleFailedAttempt(gameId, s, playerId);
                 }
             }, bonusDurationSeconds, TimeUnit.SECONDS));
 
@@ -257,41 +329,9 @@ public class GameEngineService {
             messagingTemplate.convertAndSend("/topic/game/" + gameId, correctPayload);
 
         } else {
-            // Échec ou timeout de saisie -> Application de l'Option A (Vol de main)
-            session.getPlayersBuzzedInRound().add(playerId);
-            boolean canOpponentSteal = !session.isSolo()
-                    && session.getPlayersBuzzedInRound().size() < 2
-                    && session.getRoundRemainingDurationMs() > 1000;
-
-            if (canOpponentSteal) {
-                // Relance de la manche pour l'adversaire
-                session.setState(SessionState.PLAYING);
-                session.setRoundStartTimestamp(System.currentTimeMillis());
-                session.setCurrentBuzzerPlayerId(null);
-                session.getBuzzLock().set(false);
-
-                // Armer le timer pour le temps restant
-                long remainingSec = Math.max(1, session.getRoundRemainingDurationMs() / 1000);
-                UUID roundId = session.getCurrentRoundId();
-                session.setScheduledTask(scheduler.schedule(() -> {
-                    GameSession s = getSession(gameId);
-                    if (s != null && s.getState() == SessionState.PLAYING && roundId.equals(s.getCurrentRoundId())) {
-                        log.info("Temps restant écoulé après vol pour gameId={}. Fin de manche.", gameId);
-                        endRound(gameId);
-                    }
-                }, remainingSec, TimeUnit.SECONDS));
-
-                Map<String, Object> stealPayload = Map.of(
-                        "event", "ANSWER_FAILED_STEAL_OPEN",
-                        "failedPlayerId", playerId,
-                        "remainingAudioMs", session.getRoundRemainingDurationMs()
-                );
-                messagingTemplate.convertAndSend("/topic/game/" + gameId, stealPayload);
-
-            } else {
-                // Les deux ont échoué ou plus de temps -> fin de manche
-                endRound(gameId);
-            }
+            // Échec ou timeout de saisie du 1er essai -> La main passe si possible
+            log.info("Saisie échouée pour joueur={} gameId={}. Application du vol de main.", playerId, gameId);
+            handleFailedAttempt(gameId, session, playerId);
         }
     }
 
@@ -315,16 +355,71 @@ public class GameEngineService {
 
         if (result.matched()) {
             session.addScore(playerId, 1); // +1 point bonus
+            if (result.guessType() == GuessType.TITLE) {
+                session.setTitleFound(true);
+            } else {
+                session.setArtistFound(true);
+            }
             updateThemeStats(playerId, session.getThemeId(), false, true);
-            log.info("Joueur {} a réussi le bonus (+1 pt) pour le morceau '{}' !", playerId, track.getTitle());
+            log.info("Joueur {} a réussi le bonus (+1 pt) pour le morceau '{}' ! Titre et Artiste validés.", playerId, track.getTitle());
+            endRound(gameId);
+        } else {
+            // Échec bonus : le joueur a trouvé l'un mais pas l'autre -> La main passe à l'autre joueur
+            log.info("Joueur {} a échoué au bonus pour gameId={}. La main passe.", playerId);
+            handleFailedAttempt(gameId, session, playerId);
         }
+    }
 
-        endRound(gameId);
+    /**
+     * Gestion centralisée d'une tentative manquée (1ère saisie ratée ou bonus raté).
+     * En ranked : si un joueur trouve rien ou l'un des deux éléments mais pas le second,
+     * la main passe à l'autre pendant le temps audio restant, et le premier joueur ne peut plus tenter.
+     * Si les deux ont tenté sans trouver les deux, la manche se termine.
+     */
+    private void handleFailedAttempt(UUID gameId, GameSession session, UUID playerId) {
+        session.cancelScheduledTask();
+        session.getPlayersBuzzedInRound().add(playerId);
+
+        boolean canOpponentSteal = !session.isSolo()
+                && session.getPlayersBuzzedInRound().size() < 2
+                && session.getRoundRemainingDurationMs() > 1000;
+
+        if (canOpponentSteal) {
+            // Relance de la manche pour l'adversaire avec le temps audio restant
+            session.setState(SessionState.PLAYING);
+            session.setRoundStartTimestamp(System.currentTimeMillis());
+            session.setCurrentBuzzerPlayerId(null);
+            session.getBuzzLock().set(false);
+
+            long remainingSec = Math.max(1, session.getRoundRemainingDurationMs() / 1000);
+            UUID roundId = session.getCurrentRoundId();
+            session.setScheduledTask(scheduler.schedule(() -> {
+                GameSession s = getSession(gameId);
+                if (s != null && s.getState() == SessionState.PLAYING && roundId.equals(s.getCurrentRoundId())) {
+                    log.info("Temps restant écoulé après vol pour gameId={}. Fin de manche.", gameId);
+                    endRound(gameId);
+                }
+            }, remainingSec, TimeUnit.SECONDS));
+
+            Map<String, Object> stealPayload = Map.of(
+                    "event", "ANSWER_FAILED_STEAL_OPEN",
+                    "failedPlayerId", playerId,
+                    "remainingAudioMs", session.getRoundRemainingDurationMs(),
+                    "titleFound", session.isTitleFound(),
+                    "artistFound", session.isArtistFound(),
+                    "firstFoundType", session.getFirstFoundType() != null ? session.getFirstFoundType().name() : "",
+                    "currentScores", Map.of("player1", session.getPlayer1Score(), "player2", session.getPlayer2Score())
+            );
+            messagingTemplate.convertAndSend("/topic/game/" + gameId, stealPayload);
+        } else {
+            // Les deux ont tenté et n'ont pas trouvé les deux, ou plus de temps -> fin de manche
+            log.info("Fin de manche pour gameId={} (tentatives épuisées ou temps écoulé).", gameId);
+            endRound(gameId);
+        }
     }
 
     /**
      * Passer la manche courante (Skip / Donner sa langue au chat).
-     * Compte comme une tentative manquée (0 point), interrompt l'écoute et affiche immédiatement la révélation.
      */
     public void handleSkipRound(UUID gameId, UUID playerId) {
         GameSession session = getSession(gameId);
@@ -333,8 +428,17 @@ public class GameEngineService {
         }
 
         log.info("Joueur {} passe la manche {} pour gameId={}.", playerId, session.getCurrentRoundIndex() + 1, gameId);
-        session.cancelScheduledTask();
-        endRound(gameId);
+
+        if (session.isSolo()) {
+            session.cancelScheduledTask();
+            endRound(gameId);
+        } else {
+            // En versus : si le joueur avait la main (BUZZED ou BONUS_WINDOW), cela compte comme échec de sa tentative
+            if (playerId.equals(session.getCurrentBuzzerPlayerId()) &&
+               (session.getState() == SessionState.BUZZED || session.getState() == SessionState.BONUS_WINDOW)) {
+                handleFailedAttempt(gameId, session, playerId);
+            }
+        }
     }
 
     /**
@@ -352,6 +456,10 @@ public class GameEngineService {
         Map<String, Object> revealPayload = Map.of(
                 "event", "ROUND_END",
                 "roundNumber", session.getCurrentRoundIndex() + 1,
+                "player1Id", session.getPlayer1Id() != null ? session.getPlayer1Id().toString() : "",
+                "player2Id", session.getPlayer2Id() != null ? session.getPlayer2Id().toString() : "",
+                "player1Name", session.getPlayer1Name() != null ? session.getPlayer1Name() : "",
+                "player2Name", session.getPlayer2Name() != null ? session.getPlayer2Name() : "",
                 "track", Map.of(
                         "title", track.getTitle(),
                         "artist", track.getArtist(),
@@ -447,17 +555,21 @@ public class GameEngineService {
 
             matchRepository.save(match);
 
-            Map<String, Object> matchFinishedPayload = Map.of(
-                    "event", "MATCH_FINISHED",
-                    "forfeit", true,
-                    "forfeitPlayerId", forfeitPlayerId,
-                    "winnerId", winner.getId().toString(),
-                    "player1Score", p1Score,
-                    "player2Score", p2Score,
-                    "player1EloChange", eloRes.eloChangePlayer1(),
-                    "player2EloChange", eloRes.eloChangePlayer2(),
-                    "player1NewElo", eloRes.newEloPlayer1(),
-                    "player2NewElo", eloRes.newEloPlayer2()
+            Map<String, Object> matchFinishedPayload = Map.ofEntries(
+                    entry("event", "MATCH_FINISHED"),
+                    entry("forfeit", true),
+                    entry("forfeitPlayerId", forfeitPlayerId),
+                    entry("player1Id", session.getPlayer1Id().toString()),
+                    entry("player2Id", session.getPlayer2Id().toString()),
+                    entry("player1Name", session.getPlayer1Name() != null ? session.getPlayer1Name() : ""),
+                    entry("player2Name", session.getPlayer2Name() != null ? session.getPlayer2Name() : ""),
+                    entry("winnerId", winner.getId().toString()),
+                    entry("player1Score", p1Score),
+                    entry("player2Score", p2Score),
+                    entry("player1EloChange", eloRes.eloChangePlayer1()),
+                    entry("player2EloChange", eloRes.eloChangePlayer2()),
+                    entry("player1NewElo", eloRes.newEloPlayer1()),
+                    entry("player2NewElo", eloRes.newEloPlayer2())
             );
 
             messagingTemplate.convertAndSend("/topic/game/" + gameId, matchFinishedPayload);
@@ -515,15 +627,19 @@ public class GameEngineService {
 
                 matchRepository.save(match);
 
-                Map<String, Object> matchFinishedPayload = Map.of(
-                        "event", "MATCH_FINISHED",
-                        "player1Score", session.getPlayer1Score(),
-                        "player2Score", session.getPlayer2Score(),
-                        "winnerId", winner != null ? winner.getId().toString() : "DRAW",
-                        "player1EloChange", eloRes.eloChangePlayer1(),
-                        "player2EloChange", eloRes.eloChangePlayer2(),
-                        "player1NewElo", eloRes.newEloPlayer1(),
-                        "player2NewElo", eloRes.newEloPlayer2()
+                Map<String, Object> matchFinishedPayload = Map.ofEntries(
+                        entry("event", "MATCH_FINISHED"),
+                        entry("player1Id", session.getPlayer1Id().toString()),
+                        entry("player2Id", session.getPlayer2Id().toString()),
+                        entry("player1Name", session.getPlayer1Name() != null ? session.getPlayer1Name() : ""),
+                        entry("player2Name", session.getPlayer2Name() != null ? session.getPlayer2Name() : ""),
+                        entry("player1Score", session.getPlayer1Score()),
+                        entry("player2Score", session.getPlayer2Score()),
+                        entry("winnerId", winner != null ? winner.getId().toString() : "DRAW"),
+                        entry("player1EloChange", eloRes.eloChangePlayer1()),
+                        entry("player2EloChange", eloRes.eloChangePlayer2()),
+                        entry("player1NewElo", eloRes.newEloPlayer1()),
+                        entry("player2NewElo", eloRes.newEloPlayer2())
                 );
 
                 messagingTemplate.convertAndSend("/topic/game/" + gameId, matchFinishedPayload);

@@ -45,7 +45,7 @@ blindtest:
   game:
     rounds-per-match: 10
     round-duration-seconds: 20
-    first-guess-timeout-seconds: 5
+    first-guess-timeout-seconds: 8
     bonus-duration-seconds: 10
     steal-enabled: true
   matchmaking:
