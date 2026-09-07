@@ -273,6 +273,13 @@ public class DeezerClientService {
                 return 0;
             }
 
+            // Déduplication textuelle pour éviter les doublons avec des deezer_id différents
+            List<Track> existingTracks = trackRepository.findByThemeId(theme.getId());
+            Set<String> existingPairs = new HashSet<>();
+            for (Track t : existingTracks) {
+                existingPairs.add(t.getNormalizedArtist() + "::" + t.getNormalizedTitle());
+            }
+
             int importedCount = 0;
             for (DeezerResponseDto.DeezerTrackItem item : response.getData()) {
                 if (!isAcceptableTrack(item)) {
@@ -295,15 +302,25 @@ public class DeezerClientService {
                 String artistName = (item.getArtist() != null && item.getArtist().getName() != null)
                         ? item.getArtist().getName()
                         : "Inconnu";
+
+                String normTitle = StringNormalizer.normalize(cleanTitle);
+                String normArtist = StringNormalizer.normalize(artistName);
+                String pairKey = normArtist + "::" + normTitle;
+
+                if (existingPairs.contains(pairKey)) {
+                    continue;
+                }
+                existingPairs.add(pairKey);
+
                 String albumName = (item.getAlbum() != null) ? item.getAlbum().getTitle() : null;
                 String albumCover = (item.getAlbum() != null) ? item.getAlbum().getCoverMedium() : null;
 
                 Track track = Track.builder()
                         .deezerId(item.getId())
                         .title(cleanTitle)
-                        .normalizedTitle(StringNormalizer.normalize(cleanTitle))
+                        .normalizedTitle(normTitle)
                         .artist(artistName)
-                        .normalizedArtist(StringNormalizer.normalize(artistName))
+                        .normalizedArtist(normArtist)
                         .previewUrl(item.getPreview())
                         .albumName(albumName)
                         .albumCoverUrl(albumCover)
@@ -328,36 +345,203 @@ public class DeezerClientService {
     }
 
     /**
-     * Alimente un thème en tentant d'abord la playlist dynamique Deezer (Approche A).
-     * Si l'import dynamique échoue ou donne moins de 15 morceaux, bascule sur le fallback statique JSON.
+     * Alimente un thème en CUMULANT :
+     * 1. La playlist dynamique Deezer (~50 morceaux)
+     * 2. Le catalogue statique JSON (compléments cultes absents + fusion des alias)
+     * Si l'import dynamique échoue (< 15), bascule sur le fallback statique complet.
      */
     @Transactional
     public int populateThemeWithFallback(String themeCode) {
-        int imported = 0;
+        Theme theme = themeRepository.findByCode(themeCode)
+                .orElseThrow(() -> new IllegalArgumentException("Thème introuvable : " + themeCode));
+
+        int importedFromPlaylist = 0;
         Long playlistId = getPlaylistIdForTheme(themeCode);
 
         if (playlistId != null) {
             try {
-                imported = importTracksFromPlaylist(themeCode, playlistId, 60);
+                importedFromPlaylist = importTracksFromPlaylist(themeCode, playlistId, 60);
             } catch (Exception e) {
                 log.warn("Échec de la récupération dynamique de la playlist pour {}: {}. Déclenchement du fallback.",
                         themeCode, e.getMessage());
             }
         }
 
-        if (imported < 15) {
-            log.warn("Moins de 15 morceaux obtenus dynamiquement pour le thème '{}' ({} obtenus). Activation du fallback statique (curated-catalogue.json)...",
-                    themeCode, imported);
+        // Si l'import dynamique a échoué (< 15 titres), fallback statique complet
+        if (importedFromPlaylist < 15) {
+            log.warn("Moins de 15 morceaux obtenus dynamiquement pour '{}' ({} obtenus). Activation du fallback statique complet...",
+                    themeCode, importedFromPlaylist);
             Map<String, List<CuratedTrackQuery>> staticCatalogue = loadStaticCuratedCatalogue();
             List<CuratedTrackQuery> fallbackList = staticCatalogue.get(themeCode);
             if (fallbackList != null && !fallbackList.isEmpty()) {
                 int staticImported = importCuratedTracksForTheme(themeCode, fallbackList);
-                imported += staticImported;
-                log.info("Fallback statique appliqué avec succès pour '{}' : {} titres importés.", themeCode, staticImported);
+                return importedFromPlaylist + staticImported;
+            }
+            return importedFromPlaylist;
+        }
+
+        // Cumul vertueux : on enrichit la playlist avec les pépites et alias du catalogue statique !
+        int curatedAdded = enrichThemeWithCuratedCatalogue(theme, themeCode);
+        return importedFromPlaylist + curatedAdded;
+    }
+
+    /**
+     * Enrichit un thème avec le catalogue statique JSON :
+     * - Si le morceau est déjà présent : fusion des alias altArtists / altTitles sans appel réseau.
+     * - Si le morceau est absent de la playlist : import direct depuis Deezer.
+     */
+    @Transactional
+    public int enrichThemeWithCuratedCatalogue(Theme theme, String themeCode) {
+        Map<String, List<CuratedTrackQuery>> staticCatalogue = loadStaticCuratedCatalogue();
+        List<CuratedTrackQuery> curatedList = staticCatalogue.get(themeCode);
+        if (curatedList == null || curatedList.isEmpty()) {
+            return 0;
+        }
+
+        List<Track> existingTracks = trackRepository.findByThemeId(theme.getId());
+        RestClient restClient = RestClient.builder().baseUrl(deezerBaseUrl).build();
+
+        int newlyImported = 0;
+        int aliasesMerged = 0;
+
+        for (CuratedTrackQuery q : curatedList) {
+            Track matchedTrack = findMatchingTrack(existingTracks, q);
+
+            if (matchedTrack != null) {
+                // Morceau déjà présent : fusion des alias sans appel réseau !
+                boolean updated = false;
+                if (q.altArtists() != null) {
+                    for (String altArt : q.altArtists()) {
+                        if (matchedTrack.getAltArtists().stream().noneMatch(a -> a.equalsIgnoreCase(altArt))) {
+                            matchedTrack.getAltArtists().add(altArt);
+                            updated = true;
+                        }
+                    }
+                }
+                if (q.altTitles() != null) {
+                    for (String altTit : q.altTitles()) {
+                        if (matchedTrack.getAltTitles().stream().noneMatch(t -> t.equalsIgnoreCase(altTit))) {
+                            matchedTrack.getAltTitles().add(altTit);
+                            updated = true;
+                        }
+                    }
+                }
+                if (updated) {
+                    trackRepository.save(matchedTrack);
+                    aliasesMerged++;
+                }
+            } else {
+                // Morceau culte absent de la playlist : import ciblé sur Deezer
+                boolean added = importSingleCuratedTrack(theme, q, restClient);
+                if (added) {
+                    newlyImported++;
+                    try {
+                        Thread.sleep(60);
+                    } catch (InterruptedException ignored) {}
+                }
             }
         }
 
-        return imported;
+        log.info("Enrichissement catalogue [{}] : {} nouveaux titres cultes ajoutés, {} titres enrichis avec alias.",
+                themeCode, newlyImported, aliasesMerged);
+        return newlyImported;
+    }
+
+    private Track findMatchingTrack(List<Track> existingTracks, CuratedTrackQuery q) {
+        String qNormArtist = StringNormalizer.normalize(q.artist());
+        String qNormTitle = StringNormalizer.normalize(q.track());
+
+        for (Track t : existingTracks) {
+            boolean artistMatches = t.getNormalizedArtist().equalsIgnoreCase(qNormArtist)
+                    || (q.altArtists() != null && q.altArtists().stream().anyMatch(a -> StringNormalizer.normalize(a).equalsIgnoreCase(t.getNormalizedArtist())))
+                    || t.getAltArtists().stream().anyMatch(a -> StringNormalizer.normalize(a).equalsIgnoreCase(qNormArtist));
+
+            boolean titleMatches = t.getNormalizedTitle().equalsIgnoreCase(qNormTitle)
+                    || (q.altTitles() != null && q.altTitles().stream().anyMatch(tit -> StringNormalizer.normalize(tit).equalsIgnoreCase(t.getNormalizedTitle())))
+                    || t.getAltTitles().stream().anyMatch(tit -> StringNormalizer.normalize(tit).equalsIgnoreCase(qNormTitle));
+
+            if (artistMatches && titleMatches) {
+                return t;
+            }
+        }
+        return null;
+    }
+
+    private boolean importSingleCuratedTrack(Theme theme, CuratedTrackQuery q, RestClient restClient) {
+        try {
+            String queryParam = String.format("artist:\"%s\" track:\"%s\"", q.artist(), q.track());
+            DeezerResponseDto response = restClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/search")
+                            .queryParam("q", queryParam)
+                            .queryParam("limit", 5)
+                            .build())
+                    .retrieve()
+                    .body(DeezerResponseDto.class);
+
+            if (response == null || response.getData() == null || response.getData().isEmpty()) {
+                return false;
+            }
+
+            DeezerResponseDto.DeezerTrackItem best = response.getData().stream()
+                    .filter(this::isAcceptableTrack)
+                    .max(Comparator.comparingInt(item -> item.getRank() != null ? item.getRank() : 0))
+                    .orElse(null);
+
+            if (best == null) {
+                best = response.getData().stream()
+                        .filter(i -> i.getPreview() != null && !i.getPreview().isBlank())
+                        .findFirst()
+                        .orElse(null);
+            }
+
+            if (best == null || trackRepository.findByDeezerId(best.getId()).isPresent()) {
+                return false;
+            }
+
+            String cleanTitle = (best.getTitleShort() != null && !best.getTitleShort().isBlank())
+                    ? best.getTitleShort()
+                    : best.getTitle();
+
+            cleanTitle = cleanTitle.replaceAll("(?i)\\s*-\\s*remaster(ed)?.*$", "")
+                                   .replaceAll("(?i)\\s*\\(remaster(ed)?.*\\)$", "")
+                                   .replaceAll("(?i)\\s*\\(radio edit\\)$", "")
+                                   .trim();
+
+            String artistName = (best.getArtist() != null) ? best.getArtist().getName() : q.artist();
+            String albumName = (best.getAlbum() != null) ? best.getAlbum().getTitle() : null;
+            String albumCover = (best.getAlbum() != null) ? best.getAlbum().getCoverMedium() : null;
+
+            List<String> altTitles = new ArrayList<>();
+            if (q.altTitles() != null) altTitles.addAll(q.altTitles());
+            if (!best.getTitle().equalsIgnoreCase(cleanTitle)) altTitles.add(best.getTitle());
+            if (!q.track().equalsIgnoreCase(cleanTitle)) altTitles.add(q.track());
+
+            List<String> altArtists = new ArrayList<>();
+            if (q.altArtists() != null) altArtists.addAll(q.altArtists());
+
+            Track track = Track.builder()
+                    .deezerId(best.getId())
+                    .title(cleanTitle)
+                    .normalizedTitle(StringNormalizer.normalize(cleanTitle))
+                    .artist(artistName)
+                    .normalizedArtist(StringNormalizer.normalize(artistName))
+                    .previewUrl(best.getPreview())
+                    .albumName(albumName)
+                    .albumCoverUrl(albumCover)
+                    .theme(theme)
+                    .altTitles(altTitles)
+                    .altArtists(altArtists)
+                    .isActive(true)
+                    .build();
+
+            trackRepository.save(track);
+            log.info("Complément culte importé [{}] : {} - {}", theme.getCode(), artistName, cleanTitle);
+            return true;
+        } catch (Exception e) {
+            log.warn("Erreur import complément culte {} - {} : {}", q.artist(), q.track(), e.getMessage());
+            return false;
+        }
     }
 
     private boolean isAcceptableTrack(DeezerResponseDto.DeezerTrackItem item) {
@@ -506,17 +690,17 @@ public class DeezerClientService {
     }
 
     /**
-     * Initialisation au démarrage : synchronise les morceaux si la base est vide ou contient un catalogue obsolète (< 200 titres).
+     * Initialisation au démarrage : synchronise les morceaux si la base est vide ou contient un catalogue non cumulé (< 350 titres).
      */
     @Transactional
     public void seedInitialTracksIfEmpty() {
         long currentCount = trackRepository.count();
-        if (currentCount >= 200) {
-            log.info("La base contient déjà le catalogue dynamique complet ({} titres).", currentCount);
+        if (currentCount >= 350) {
+            log.info("La base contient déjà le catalogue cumulé complet ({} titres).", currentCount);
             return;
         }
 
-        log.info("Base de données contenant un catalogue incomplet ou ancien ({} titres) : lancement du peuplement dynamique des playlists...", currentCount);
+        log.info("Base de données nécessitant une synchronisation cumulée ({} titres) : enrichissement playlists + catalogue culte...", currentCount);
         reseedCuratedCatalogue();
     }
 }

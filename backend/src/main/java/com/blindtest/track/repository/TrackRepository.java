@@ -15,6 +15,8 @@ public interface TrackRepository extends JpaRepository<Track, UUID> {
 
     Optional<Track> findByDeezerId(Long deezerId);
 
+    List<Track> findByThemeId(UUID themeId);
+
     @Query(value = "SELECT * FROM tracks WHERE theme_id = :themeId AND is_active = true ORDER BY RANDOM() LIMIT :limit", nativeQuery = true)
     List<Track> findRandomTracksByTheme(@Param("themeId") UUID themeId, @Param("limit") int limit);
 
