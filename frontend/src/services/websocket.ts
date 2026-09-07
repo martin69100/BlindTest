@@ -94,6 +94,29 @@ class WebSocketService {
     });
   }
 
+  public subscribeToLobby(code: string, onMessage: (message: any) => void) {
+    if (!this.client || !this.isConnected) {
+      this.connect(() => {
+        this.client?.subscribe(`/topic/lobby/${code}`, (msg: IMessage) => {
+          try {
+            onMessage(JSON.parse(msg.body));
+          } catch (e) {
+            console.error('Erreur parsing payload lobby :', e);
+          }
+        });
+      });
+      return;
+    }
+
+    return this.client.subscribe(`/topic/lobby/${code}`, (msg: IMessage) => {
+      try {
+        onMessage(JSON.parse(msg.body));
+      } catch (e) {
+        console.error('Erreur parsing payload lobby :', e);
+      }
+    });
+  }
+
   public subscribeToMatchmakingStats(onMessage: (stats: any) => void) {
     let sub: any = null;
     let cancelled = false;

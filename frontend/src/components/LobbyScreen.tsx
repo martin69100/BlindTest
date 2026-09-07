@@ -1,7 +1,24 @@
 import React, { useEffect, useState } from 'react';
-import { Swords, Dumbbell, Sparkles, Disc, Flame, Music, Radio, Mic, ChevronRight, Users } from 'lucide-react';
+import {
+  Swords,
+  Dumbbell,
+  Sparkles,
+  Disc,
+  Flame,
+  Music,
+  Radio,
+  Mic,
+  ChevronRight,
+  Users,
+  KeyRound,
+  Plus,
+  Shield,
+  X,
+  AlertCircle,
+  Loader2,
+} from 'lucide-react';
 import type { Theme, MatchmakingStats } from '../types';
-import { themeService, matchmakingService, soloService, GOOGLE_AUTH_URL } from '../services/api';
+import { themeService, matchmakingService, soloService, customLobbyService, GOOGLE_AUTH_URL } from '../services/api';
 import { useAuthStore } from '../store/useAuthStore';
 import { useGameStore } from '../store/useGameStore';
 import { wsService } from '../services/websocket';
@@ -9,7 +26,7 @@ import { MatchmakingRadarScreen } from './MatchmakingRadarScreen';
 
 export const LobbyScreen: React.FC = () => {
   const { user } = useAuthStore();
-  const { initGame } = useGameStore();
+  const { initGame, setActiveLobby } = useGameStore();
 
   const DEFAULT_THEMES: Theme[] = [
     { id: '1', code: 'ANNEES_80', name: 'Années 80', description: 'Synthpop & disco', trackCount: 40 },
@@ -29,6 +46,13 @@ export const LobbyScreen: React.FC = () => {
     activeMatches: 0,
   });
 
+  // États pour la création et jonction de salon personnalisé
+  const [isCreatingLobby, setIsCreatingLobby] = useState(false);
+  const [showJoinModal, setShowJoinModal] = useState(false);
+  const [joinCodeInput, setJoinCodeInput] = useState('');
+  const [isJoiningLobby, setIsJoiningLobby] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
+
   useEffect(() => {
     themeService.getThemes()
       .then((data) => {
@@ -38,6 +62,32 @@ export const LobbyScreen: React.FC = () => {
         console.warn("Backend non encore connecté, utilisation des thèmes locaux :", err.message);
       });
   }, []);
+
+  // Détection du paramètre d'invitation ?lobby=CODE dans l'URL
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const lobbyParam = urlParams.get('lobby');
+    if (lobbyParam) {
+      const code = lobbyParam.trim().toUpperCase();
+      if (user) {
+        setIsJoiningLobby(true);
+        customLobbyService.joinLobby(code, user)
+          .then((lobby) => {
+            setActiveLobby(lobby);
+            window.history.replaceState({}, document.title, window.location.pathname);
+          })
+          .catch((err) => {
+            setJoinError(err.response?.data?.message || err.message || "Impossible de rejoindre le salon invité.");
+            setJoinCodeInput(code);
+            setShowJoinModal(true);
+          })
+          .finally(() => setIsJoiningLobby(false));
+      } else {
+        // Mémoriser le code dans la session pour rejoindre dès la connexion OAuth
+        sessionStorage.setItem('pending_lobby_code', code);
+      }
+    }
+  }, [user, setActiveLobby]);
 
   // Récupération initiale et écoute en temps réel des joueurs en recherche et en jeu
   useEffect(() => {
@@ -100,6 +150,48 @@ export const LobbyScreen: React.FC = () => {
       initGame(res.gameId, true, user.id, undefined, user.displayName);
     } catch (e) {
       console.error("Erreur lors du démarrage solo :", e);
+    }
+  };
+
+  // Créer un salon personnalisé
+  const handleCreateLobby = async () => {
+    if (!user || isCreatingLobby) return;
+    setIsCreatingLobby(true);
+    try {
+      const activeTheme = themes.find((t) => t.id === selectedThemeId);
+      const lobby = await customLobbyService.createLobby(
+        user,
+        selectedThemeId || undefined,
+        activeTheme ? activeTheme.name : undefined,
+        10
+      );
+      setActiveLobby(lobby);
+    } catch (e: any) {
+      console.error("Erreur création salon personnalisé :", e);
+      alert(e.response?.data?.message || "Impossible de créer le salon pour le moment.");
+    } finally {
+      setIsCreatingLobby(false);
+    }
+  };
+
+  // Rejoindre un salon personnalisé par code
+  const handleJoinLobby = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const code = joinCodeInput.trim().toUpperCase();
+    if (!user || !code || isJoiningLobby) return;
+
+    setIsJoiningLobby(true);
+    setJoinError(null);
+    try {
+      const lobby = await customLobbyService.joinLobby(code, user);
+      setActiveLobby(lobby);
+      setShowJoinModal(false);
+      setJoinCodeInput('');
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } catch (err: any) {
+      setJoinError(err.response?.data?.message || err.message || "Code introuvable ou salon inaccessible.");
+    } finally {
+      setIsJoiningLobby(false);
     }
   };
 
@@ -166,7 +258,7 @@ export const LobbyScreen: React.FC = () => {
           Prêt à tester votre oreille musicale ?
         </h2>
         <p className="text-slate-400 text-sm max-w-xl mx-auto">
-          Choisissez un thème ou jouez en mode général, défiez un joueur à votre niveau ELO ou entraînez-vous en solo.
+          Défiez un joueur à votre niveau ELO, lancez un salon privé avec vos amis ou entraînez-vous en solo.
         </p>
       </div>
 
@@ -177,7 +269,7 @@ export const LobbyScreen: React.FC = () => {
           {selectedThemeId && (
             <button
               onClick={() => setSelectedThemeId(null)}
-              className="text-xs text-brand-400 hover:underline font-semibold"
+              className="text-xs text-brand-400 hover:underline font-semibold cursor-pointer"
             >
               Réinitialiser (Tous thèmes)
             </button>
@@ -225,71 +317,202 @@ export const LobbyScreen: React.FC = () => {
         </div>
       </div>
 
-      {/* Sélection du Mode de Jeu (Grandes Cartes d'Action) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* Sélection du Mode de Jeu (3 Grandes Cartes) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Mode Versus Classé */}
-        <div className="relative group bg-gradient-to-br from-dark-900 to-dark-950 border border-brand-500/40 hover:border-brand-500 rounded-3xl p-6 sm:p-8 shadow-xl transition-all hover:shadow-2xl hover:shadow-brand-500/10 flex flex-col justify-between">
+        <div className="relative group bg-gradient-to-br from-dark-900 to-dark-950 border border-brand-500/40 hover:border-brand-500 rounded-3xl p-6 sm:p-7 shadow-xl transition-all hover:shadow-2xl hover:shadow-brand-500/10 flex flex-col justify-between">
           <div>
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-brand-600 to-rose-600 flex items-center justify-center mb-6 shadow-lg shadow-brand-500/30">
-              <Swords className="w-7 h-7 text-white" />
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-brand-600 to-rose-600 flex items-center justify-center mb-5 shadow-lg shadow-brand-500/30">
+              <Swords className="w-6 h-6 text-white" />
             </div>
-            <div className="flex flex-wrap items-center gap-2 mb-4">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-rose-400 bg-rose-500/10 px-3 py-1 rounded-full border border-rose-500/20">
+            <div className="flex flex-wrap items-center gap-1.5 mb-3">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-rose-400 bg-rose-500/10 px-2.5 py-0.5 rounded-full border border-rose-500/20">
                 Compétitif &bull; ELO
               </span>
-              <div className="flex items-center space-x-1.5 bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-1 rounded-full text-[11px] font-bold text-emerald-400">
+              <div className="flex items-center space-x-1 bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 rounded-full text-[10px] font-bold text-emerald-400">
                 <span className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                 </span>
-                <span>{matchStats.inQueue} en recherche</span>
-              </div>
-              <div className="flex items-center space-x-1.5 bg-indigo-500/10 border border-indigo-500/25 px-2.5 py-1 rounded-full text-[11px] font-bold text-indigo-300">
-                <Users className="w-3.5 h-3.5 text-indigo-400" />
-                <span>{matchStats.inGame} en partie</span>
+                <span>{matchStats.inQueue} en file</span>
               </div>
             </div>
-            <h3 className="text-2xl font-black text-white mb-2">Mode Versus Classé</h3>
-            <p className="text-xs sm:text-sm text-slate-400 mb-6">
-              Affrontez un adversaire en temps réel. 10 manches de 20s. Buzzer ultra-réactif, vol de main et calcul d'ELO à l'issue de la partie.
+            <h3 className="text-xl font-black text-white mb-2">Versus Classé (1v1)</h3>
+            <p className="text-xs text-slate-400 mb-6 leading-relaxed">
+              Match 1v1 en temps réel. 10 manches de 20s avec vol de main. Le résultat impacte directement votre rang ELO officiel.
             </p>
           </div>
 
           <button
             onClick={handleStartVersus}
             disabled={!user}
-            className="w-full bg-gradient-to-r from-brand-600 to-rose-600 hover:from-brand-500 hover:to-rose-500 disabled:opacity-50 text-white font-bold py-4 px-6 rounded-2xl flex items-center justify-center space-x-2 shadow-lg shadow-brand-600/30 transition-transform active:scale-98 cursor-pointer"
+            className="w-full bg-gradient-to-r from-brand-600 to-rose-600 hover:from-brand-500 hover:to-rose-500 disabled:opacity-50 text-white font-bold py-3.5 px-5 rounded-2xl flex items-center justify-center space-x-2 shadow-lg shadow-brand-600/30 transition-transform active:scale-98 cursor-pointer"
           >
             <span>Trouver un match ELO</span>
-            <ChevronRight className="w-5 h-5" />
+            <ChevronRight className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Mode Solo Entraînement */}
-        <div className="relative group bg-gradient-to-br from-dark-900 to-dark-950 border border-slate-800 hover:border-slate-700 rounded-3xl p-6 sm:p-8 shadow-xl transition-all hover:shadow-2xl flex flex-col justify-between">
+        {/* NOUVEAU : Salon Personnalisé (Multijoueur Amical) */}
+        <div className="relative group bg-gradient-to-br from-dark-900 to-dark-950 border border-indigo-500/40 hover:border-indigo-500 rounded-3xl p-6 sm:p-7 shadow-xl transition-all hover:shadow-2xl hover:shadow-indigo-500/10 flex flex-col justify-between">
           <div>
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center mb-6 shadow-lg shadow-cyan-500/30">
-              <Dumbbell className="w-7 h-7 text-white" />
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-brand-600 flex items-center justify-center mb-5 shadow-lg shadow-indigo-500/30">
+              <Users className="w-6 h-6 text-white" />
             </div>
-            <span className="text-[11px] font-extrabold uppercase tracking-wider text-cyan-400 bg-cyan-500/10 px-3 py-1 rounded-full border border-cyan-500/20">
-              Solo &bull; Sans Pression
-            </span>
-            <h3 className="text-2xl font-black text-white mt-3 mb-2">Mode Entraînement</h3>
-            <p className="text-xs sm:text-sm text-slate-400 mb-6">
-              Perfectionnez vos connaissances sur un thème ciblé. Les morceaux s'enchaînent pour enrichir votre niveau de maîtrise.
+            <div className="flex flex-wrap items-center gap-1.5 mb-3">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-400 bg-indigo-500/10 px-2.5 py-0.5 rounded-full border border-indigo-500/20">
+                Salon Privé &bull; 2+ Joueurs
+              </span>
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20 flex items-center space-x-1">
+                <Shield className="w-3 h-3 text-emerald-400" />
+                <span>Sans impact ELO</span>
+              </span>
+            </div>
+            <h3 className="text-xl font-black text-white mb-2">Partie Personnalisée</h3>
+            <p className="text-xs text-slate-400 mb-6 leading-relaxed">
+              Créez un salon privé entre amis avec lien d'invitation. Choisissez votre thème, le nombre de manches, et rejouez à volonté avec podium final !
+            </p>
+          </div>
+
+          <div className="space-y-2.5">
+            <button
+              onClick={handleCreateLobby}
+              disabled={!user || isCreatingLobby}
+              className="w-full bg-gradient-to-r from-indigo-600 to-brand-600 hover:from-indigo-500 hover:to-brand-500 disabled:opacity-50 text-white font-bold py-3 px-5 rounded-2xl flex items-center justify-center space-x-2 shadow-lg shadow-indigo-500/25 transition-transform active:scale-98 cursor-pointer text-xs sm:text-sm"
+            >
+              {isCreatingLobby ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Création du salon...</span>
+                </>
+              ) : (
+                <>
+                  <Plus className="w-4 h-4" />
+                  <span>Créer un salon</span>
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={() => setShowJoinModal(true)}
+              disabled={!user}
+              className="w-full bg-dark-800 hover:bg-dark-700 disabled:opacity-50 text-slate-300 hover:text-white border border-slate-700 font-bold py-2.5 px-5 rounded-2xl flex items-center justify-center space-x-2 transition-all active:scale-98 cursor-pointer text-xs"
+            >
+              <KeyRound className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Rejoindre avec un code</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Mode Solo Entraînement */}
+        <div className="relative group bg-gradient-to-br from-dark-900 to-dark-950 border border-slate-800 hover:border-slate-700 rounded-3xl p-6 sm:p-7 shadow-xl transition-all hover:shadow-2xl flex flex-col justify-between">
+          <div>
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center mb-5 shadow-lg shadow-cyan-500/30">
+              <Dumbbell className="w-6 h-6 text-white" />
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 mb-3">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-cyan-400 bg-cyan-500/10 px-2.5 py-0.5 rounded-full border border-cyan-500/20">
+                Solo &bull; Sans Pression
+              </span>
+            </div>
+            <h3 className="text-xl font-black text-white mb-2">Entraînement Solo</h3>
+            <p className="text-xs text-slate-400 mb-6 leading-relaxed">
+              Perfectionnez vos connaissances à votre propre rythme. Idéal pour découvrir les extraits musicaux et s'entraîner aux réflexes du buzzer.
             </p>
           </div>
 
           <button
             onClick={handleStartSolo}
             disabled={!user}
-            className="w-full bg-dark-800 hover:bg-dark-700 disabled:opacity-50 text-slate-200 border border-slate-700 font-bold py-4 px-6 rounded-2xl flex items-center justify-center space-x-2 transition-transform active:scale-98 cursor-pointer"
+            className="w-full bg-dark-800 hover:bg-dark-700 disabled:opacity-50 text-slate-200 border border-slate-700 font-bold py-3.5 px-5 rounded-2xl flex items-center justify-center space-x-2 transition-transform active:scale-98 cursor-pointer"
           >
             <span>Démarrer l’entraînement</span>
-            <ChevronRight className="w-5 h-5" />
+            <ChevronRight className="w-4 h-4" />
           </button>
         </div>
       </div>
+
+      {/* Modale Rejoindre un Salon avec un Code */}
+      {showJoinModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-dark-900 border border-indigo-500/40 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative">
+            <button
+              onClick={() => {
+                setShowJoinModal(false);
+                setJoinError(null);
+              }}
+              className="absolute top-5 right-5 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-dark-800 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="w-14 h-14 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center mx-auto mb-4 border border-indigo-500/30">
+              <KeyRound className="w-7 h-7" />
+            </div>
+
+            <h3 className="text-xl font-black text-white text-center mb-1">
+              Rejoindre un salon privé
+            </h3>
+            <p className="text-xs text-slate-400 text-center mb-6">
+              Entrez le code à 6 lettres/chiffres communiqué par votre ami ou collez l'URL d'invitation.
+            </p>
+
+            <form onSubmit={handleJoinLobby} className="space-y-4">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                  Code du salon (6 caractères)
+                </label>
+                <input
+                  type="text"
+                  maxLength={10}
+                  value={joinCodeInput}
+                  onChange={(e) => {
+                    setJoinCodeInput(e.target.value.toUpperCase());
+                    setJoinError(null);
+                  }}
+                  placeholder="EX: A7K9X2"
+                  autoFocus
+                  className="w-full bg-dark-950 border border-slate-700 focus:border-indigo-500 rounded-2xl py-3.5 px-4 text-center text-xl font-mono font-black text-white tracking-widest placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all uppercase"
+                />
+              </div>
+
+              {joinError && (
+                <div className="flex items-center space-x-2 text-xs text-rose-400 bg-rose-500/10 border border-rose-500/30 rounded-xl p-3">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{joinError}</span>
+                </div>
+              )}
+
+              <div className="flex space-x-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowJoinModal(false);
+                    setJoinError(null);
+                  }}
+                  className="flex-1 bg-dark-800 hover:bg-dark-700 text-slate-300 font-bold py-3 rounded-xl border border-slate-700 text-xs transition-colors cursor-pointer"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={joinCodeInput.trim().length < 4 || isJoiningLobby}
+                  className="flex-1 bg-gradient-to-r from-indigo-600 to-brand-600 hover:from-indigo-500 hover:to-brand-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl text-xs transition-transform active:scale-98 shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-2 cursor-pointer"
+                >
+                  {isJoiningLobby ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Connexion...</span>
+                    </>
+                  ) : (
+                    <span>Rejoindre le salon</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

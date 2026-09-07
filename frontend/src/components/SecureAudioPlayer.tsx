@@ -1,9 +1,12 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Volume2, VolumeX, AlertCircle, PlayCircle } from 'lucide-react';
 import { useGameStore } from '../store/useGameStore';
+import { useAuthStore } from '../store/useAuthStore';
+import { wsService } from '../services/websocket';
 
 export const SecureAudioPlayer: React.FC = () => {
-  const { audioUrl, phase } = useGameStore();
+  const { audioUrl, phase, gameId } = useGameStore();
+  const { user } = useAuthStore();
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Récupération sécurisée et persistante du volume (défaut 0.8)
@@ -22,24 +25,13 @@ export const SecureAudioPlayer: React.FC = () => {
   const [audioError, setAudioError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
 
-  const handleManualRetry = () => {
-    setAudioError(null);
-    setRetryCount(0);
-    if (audioRef.current) {
-      audioRef.current.load();
-      tryPlay();
-    }
-  };
-
   const isMutedRef = useRef(isMuted);
   isMutedRef.current = isMuted;
 
   const volumeRef = useRef(volume);
   volumeRef.current = volume;
 
-  // Fonction utilitaire pour lancer la lecture avec gestion d'autoplay.
-  // Dépendances vides car on utilise les refs pour le volume, garantissant
-  // qu'aucun changement de slider ne recrée cette fonction.
+  // Fonction utilitaire pour lancer la lecture avec gestion d'autoplay et attente si la source charge encore
   const tryPlay = useCallback(() => {
     const audio = audioRef.current;
     if (!audio || !audio.src) return;
@@ -58,12 +50,34 @@ export const SecureAudioPlayer: React.FC = () => {
           if (err.name === 'NotAllowedError') {
             setAutoplayBlocked(true);
             console.warn("Autoplay bloqué par la politique du navigateur. Interaction requise.");
+          } else if (err.name === 'NotSupportedError') {
+            // La source est en cours de résolution par le navigateur : relancer dès que canplay est prêt
+            const onCanPlay = () => {
+              audio.removeEventListener('canplay', onCanPlay);
+              if (phase === 'PLAYING') {
+                audio.play().catch(() => {});
+              }
+            };
+            audio.addEventListener('canplay', onCanPlay, { once: true });
           } else if (err.name !== 'AbortError') {
-            console.error("Erreur de lecture audio :", err);
+            console.warn("Lecture audio en attente de source :", err.name);
           }
         });
     }
-  }, []);
+  }, [phase]);
+
+  const handleManualRetry = () => {
+    setAudioError(null);
+    setRetryCount(0);
+    // Demander au serveur un nouveau lien signé tout frais
+    if (gameId && user) {
+      wsService.sendReady(gameId, user.id);
+    }
+    if (audioRef.current) {
+      audioRef.current.load();
+      tryPlay();
+    }
+  };
 
   // Déblocage automatique au moindre clic ou appui clavier dans la fenêtre
   useEffect(() => {
@@ -82,7 +96,7 @@ export const SecureAudioPlayer: React.FC = () => {
     };
   }, [autoplayBlocked, phase, tryPlay]);
 
-  // Réaction STRICTEMENT au changement d'URL audio (nouvelle manche uniquement)
+  // Réaction STRICTEMENT au changement d'URL audio (nouvelle manche)
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -92,7 +106,6 @@ export const SecureAudioPlayer: React.FC = () => {
       setAutoplayBlocked(false);
       setRetryCount(0);
       audio.currentTime = 0;
-      audio.load();
 
       if (phase === 'PLAYING') {
         tryPlay();
@@ -100,7 +113,7 @@ export const SecureAudioPlayer: React.FC = () => {
     } else {
       audio.pause();
     }
-  }, [audioUrl]);
+  }, [audioUrl, phase, tryPlay]);
 
   // Réaction au changement de phase de jeu (Buzz, Vol de main, Révélation)
   useEffect(() => {
@@ -144,6 +157,7 @@ export const SecureAudioPlayer: React.FC = () => {
         ref={audioRef}
         src={audioUrl || undefined}
         preload="auto"
+        crossOrigin="anonymous"
         onPlaying={() => {
           setAutoplayBlocked(false);
           setAudioError(null);
@@ -154,12 +168,15 @@ export const SecureAudioPlayer: React.FC = () => {
           if (audioUrl) {
             if (retryCount < 2) {
               setRetryCount((prev) => prev + 1);
+              // Si le flux a échoué (ex: token CDN expiré), demander une resynchronisation avec un token frais
+              if (gameId && user) {
+                wsService.sendReady(gameId, user.id);
+              }
               setTimeout(() => {
                 if (audioRef.current && phase === 'PLAYING') {
-                  audioRef.current.load();
                   tryPlay();
                 }
-              }, 600);
+              }, 400);
             } else {
               setAudioError("Flux audio temporairement indisponible");
             }

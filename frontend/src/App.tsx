@@ -3,13 +3,29 @@ import { Navbar } from './components/Navbar';
 import { LobbyScreen } from './components/LobbyScreen';
 import { VersusArenaScreen } from './components/VersusArenaScreen';
 import { ProfileScreen } from './components/ProfileScreen';
+import { CustomLobbyScreen } from './components/CustomLobbyScreen';
 import { useGameStore } from './store/useGameStore';
 import { useAuthStore } from './store/useAuthStore';
 import { wsService } from './services/websocket';
-import { authService } from './services/api';
+import { authService, customLobbyService } from './services/api';
 
 export const App: React.FC = () => {
-  const { gameId, phase, onRoundStart, onPlayerBuzzed, onFirstAnswerCorrect, onStealOpen, onRoundEnd, onMatchFinished } = useGameStore();
+  const {
+    gameId,
+    phase,
+    activeLobby,
+    lobbyCode,
+    setActiveLobby,
+    returnToCustomLobby,
+    initCustomGame,
+    onRoundStart,
+    onPlayerBuzzed,
+    onFirstAnswerCorrect,
+    onStealOpen,
+    onAnswerWrong,
+    onRoundEnd,
+    onMatchFinished,
+  } = useGameStore();
   const { user, setUser } = useAuthStore();
   const [isAuthenticating, setIsAuthenticating] = useState(() => {
     return window.location.pathname.includes('/auth/callback') || window.location.pathname.includes('/auth/classback');
@@ -64,6 +80,23 @@ export const App: React.FC = () => {
     }
   }, [setUser]);
 
+  // Jonction automatique si un code de salon était en attente avant l'authentification
+  useEffect(() => {
+    if (!user) return;
+    const pendingCode = sessionStorage.getItem('pending_lobby_code');
+    if (pendingCode) {
+      sessionStorage.removeItem('pending_lobby_code');
+      customLobbyService.joinLobby(pendingCode, user)
+        .then((lobby) => {
+          setActiveLobby(lobby);
+          window.history.replaceState({}, document.title, window.location.pathname);
+        })
+        .catch((err) => {
+          console.warn('Impossible de rejoindre automatiquement le salon en attente :', err);
+        });
+    }
+  }, [user, setActiveLobby]);
+
   // Connexion WebSocket STOMP globale au démarrage
   useEffect(() => {
     wsService.connect(
@@ -97,6 +130,9 @@ export const App: React.FC = () => {
         case 'ANSWER_FAILED_STEAL_OPEN':
           onStealOpen(payload);
           break;
+        case 'ANSWER_WRONG':
+          onAnswerWrong(payload);
+          break;
         case 'ROUND_END':
           onRoundEnd(payload);
           break;
@@ -112,7 +148,32 @@ export const App: React.FC = () => {
     return () => {
       if (sub) sub.unsubscribe();
     };
-  }, [gameId, onRoundStart, onPlayerBuzzed, onFirstAnswerCorrect, onStealOpen, onRoundEnd, onMatchFinished]);
+  }, [gameId, phase, user, onRoundStart, onPlayerBuzzed, onFirstAnswerCorrect, onStealOpen, onAnswerWrong, onRoundEnd, onMatchFinished]);
+
+  // Écoute globale des événements de salon sur /topic/lobby/{currentLobbyCode}
+  const currentLobbyCode = activeLobby?.code || lobbyCode;
+  useEffect(() => {
+    if (!currentLobbyCode) return;
+
+    const sub = wsService.subscribeToLobby(currentLobbyCode, (payload) => {
+      if (payload.event === 'LOBBY_UPDATED' && payload.lobby) {
+        setActiveLobby(payload.lobby);
+      } else if (payload.event === 'LOBBY_GAME_START') {
+        initCustomGame(payload.gameId, payload.lobbyCode, payload.roundsCount || 10);
+      } else if (payload.event === 'LOBBY_RETURN') {
+        returnToCustomLobby();
+        customLobbyService.getLobby(currentLobbyCode).then((fresh) => {
+          if (fresh) setActiveLobby(fresh);
+        });
+      }
+    });
+
+    return () => {
+      if (sub && typeof sub.unsubscribe === 'function') {
+        sub.unsubscribe();
+      }
+    };
+  }, [currentLobbyCode, setActiveLobby, initCustomGame, returnToCustomLobby]);
 
   if (isAuthenticating) {
     return (
@@ -133,6 +194,11 @@ export const App: React.FC = () => {
       <main className="flex-1 flex flex-col justify-center">
         {isInGame ? (
           <VersusArenaScreen />
+        ) : activeLobby ? (
+          <CustomLobbyScreen
+            initialLobby={activeLobby}
+            onLeave={() => setActiveLobby(null)}
+          />
         ) : currentView === 'PROFILE' ? (
           <ProfileScreen onBack={() => setCurrentView('LOBBY')} />
         ) : (

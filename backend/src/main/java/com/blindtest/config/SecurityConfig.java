@@ -47,6 +47,7 @@ public class SecurityConfig {
                                 "/api/v1/games/**",
                                 "/api/v1/matchmaking/**",
                                 "/api/v1/users/**",
+                                "/api/v1/lobby/**",
                                 "/ws/**"
                         ).permitAll()
                         .anyRequest().authenticated()

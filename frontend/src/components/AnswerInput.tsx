@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Clock, Sparkles, SkipForward } from 'lucide-react';
+import { Send, Clock, Sparkles, SkipForward, X } from 'lucide-react';
 import { useGameStore } from '../store/useGameStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { wsService } from '../services/websocket';
@@ -14,6 +14,8 @@ export const AnswerInput: React.FC = () => {
     firstFoundName,
     inputTimeoutSeconds,
     bonusDurationSeconds,
+    lastWrongGuess,
+    isSolo,
   } = useGameStore();
   const { user } = useAuthStore();
 
@@ -23,6 +25,10 @@ export const AnswerInput: React.FC = () => {
 
   const isMyTurn = user && buzzerPlayerId === user.id;
   const isBonus = phase === 'BONUS';
+  const opponentWrongGuess =
+    !isSolo && lastWrongGuess && user && lastWrongGuess.playerId !== user.id
+      ? lastWrongGuess
+      : null;
 
   // Réinitialisation et focus automatique dès l'apparition du champ
   useEffect(() => {
@@ -101,6 +107,16 @@ export const AnswerInput: React.FC = () => {
         <p className="text-xs text-slate-400 mb-3">
           Déjà validé : <span className="text-emerald-400 font-semibold">{firstFoundName}</span> ({firstFoundType === 'TITLE' ? 'Titre' : 'Artiste'})
         </p>
+      )}
+
+      {opponentWrongGuess && (
+        <div className="flex items-center space-x-2 text-xs bg-rose-500/10 border border-rose-500/30 rounded-xl px-3.5 py-2 mb-3 text-rose-300">
+          <X className="w-4 h-4 text-rose-400 shrink-0 stroke-[2.5]" />
+          <span className="truncate">
+            <strong className="text-white font-bold">{opponentWrongGuess.playerName || 'L’adversaire'}</strong> a tenté :{' '}
+            <span className="line-through text-rose-300 font-semibold">« {opponentWrongGuess.guess} »</span> (Faux)
+          </span>
+        </div>
       )}
 
       {/* Formulaire de saisie si c'est notre tour */}

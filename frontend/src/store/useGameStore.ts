@@ -1,10 +1,16 @@
 import { create } from 'zustand';
 import type {
+  AnswerWrongEvent,
+  LeaderboardEntry,
+  LobbyData,
   MatchFinishedEvent,
   PlayerBuzzedEvent,
   RevealedTrack,
   RoundEndEvent,
+  RoundHistoryItem,
   RoundStartEvent,
+  StealOpenEvent,
+  WrongGuess,
 } from '../types';
 
 export type GamePhase = 'LOBBY' | 'WAITING' | 'PLAYING' | 'BUZZED' | 'BONUS' | 'REVEAL' | 'FINISHED';
@@ -12,6 +18,9 @@ export type GamePhase = 'LOBBY' | 'WAITING' | 'PLAYING' | 'BUZZED' | 'BONUS' | '
 interface GameState {
   gameId: string | null;
   isSolo: boolean;
+  isCustom: boolean;
+  lobbyCode: string | null;
+  activeLobby: LobbyData | null;
   phase: GamePhase;
   roundNumber: number;
   totalRounds: number;
@@ -26,6 +35,8 @@ interface GameState {
   inputTimeoutSeconds: number;
   bonusDurationSeconds: number;
   failedPlayerIds: string[];
+  lastWrongGuess: WrongGuess | null;
+  roundWrongGuesses: WrongGuess[];
 
   // Joueurs & Scores
   player1Id: string | null;
@@ -34,9 +45,21 @@ interface GameState {
   player2Name: string | null;
   player1Score: number;
   player2Score: number;
+  playerScores: Record<string, number>;
+  leaderboard: LeaderboardEntry[];
 
   // Révélation & Fin
   revealedTrack: RevealedTrack | null;
+  lastRoundResult: {
+    titleFound: boolean;
+    artistFound: boolean;
+    titleFoundByPlayerId: string | null;
+    artistFoundByPlayerId: string | null;
+    titleFoundByName?: string;
+    artistFoundByName?: string;
+    wrongGuesses?: WrongGuess[];
+  } | null;
+  roundHistory: RoundHistoryItem[];
   isLastRound: boolean;
   matchResult: MatchFinishedEvent | null;
 
@@ -49,10 +72,18 @@ interface GameState {
     player1Name?: string,
     player2Name?: string
   ) => void;
+  initCustomGame: (
+    gameId: string,
+    lobbyCode: string,
+    totalRounds?: number
+  ) => void;
+  setActiveLobby: (lobby: LobbyData | null) => void;
+  returnToCustomLobby: () => void;
   onRoundStart: (event: RoundStartEvent) => void;
   onPlayerBuzzed: (event: PlayerBuzzedEvent) => void;
   onFirstAnswerCorrect: (event: any) => void;
-  onStealOpen: (event: any) => void;
+  onStealOpen: (event: StealOpenEvent) => void;
+  onAnswerWrong: (event: AnswerWrongEvent) => void;
   onRoundEnd: (event: RoundEndEvent) => void;
   onMatchFinished: (event: MatchFinishedEvent) => void;
   resetGame: () => void;
@@ -61,6 +92,9 @@ interface GameState {
 export const useGameStore = create<GameState>((set) => ({
   gameId: null,
   isSolo: false,
+  isCustom: false,
+  lobbyCode: null,
+  activeLobby: null,
   phase: 'LOBBY',
   roundNumber: 0,
   totalRounds: 10,
@@ -74,6 +108,8 @@ export const useGameStore = create<GameState>((set) => ({
   inputTimeoutSeconds: 8,
   bonusDurationSeconds: 10,
   failedPlayerIds: [],
+  lastWrongGuess: null,
+  roundWrongGuesses: [],
 
   player1Id: null,
   player2Id: null,
@@ -81,26 +117,81 @@ export const useGameStore = create<GameState>((set) => ({
   player2Name: null,
   player1Score: 0,
   player2Score: 0,
+  playerScores: {},
+  leaderboard: [],
 
   revealedTrack: null,
+  lastRoundResult: null,
+  roundHistory: [],
   isLastRound: false,
   matchResult: null,
+
+  setActiveLobby: (lobby) => set({ activeLobby: lobby }),
+
+  initCustomGame: (gameId, lobbyCode, totalRounds = 10) => {
+    set({
+      gameId,
+      isSolo: false,
+      isCustom: true,
+      lobbyCode,
+      phase: 'WAITING',
+      roundNumber: 0,
+      totalRounds,
+      player1Score: 0,
+      player2Score: 0,
+      playerScores: {},
+      leaderboard: [],
+      revealedTrack: null,
+      lastRoundResult: null,
+      roundHistory: [],
+      matchResult: null,
+      failedPlayerIds: [],
+      lastWrongGuess: null,
+      roundWrongGuesses: [],
+    });
+  },
+
+  returnToCustomLobby: () => {
+    set({
+      phase: 'LOBBY',
+      gameId: null,
+      audioUrl: null,
+      buzzerPlayerId: null,
+      buzzerName: null,
+      firstFoundType: null,
+      firstFoundName: null,
+      revealedTrack: null,
+      lastRoundResult: null,
+      matchResult: null,
+      failedPlayerIds: [],
+      lastWrongGuess: null,
+      roundWrongGuesses: [],
+    });
+  },
 
   initGame: (gameId, isSolo = false, player1Id, player2Id, player1Name, player2Name) => {
     set({
       gameId,
       isSolo,
+      isCustom: false,
+      lobbyCode: null,
       phase: 'WAITING',
       roundNumber: 0,
       player1Score: 0,
       player2Score: 0,
+      playerScores: {},
+      leaderboard: [],
       revealedTrack: null,
+      lastRoundResult: null,
+      roundHistory: [],
       matchResult: null,
       player1Id: player1Id || null,
       player2Id: player2Id || null,
       player1Name: player1Name || null,
       player2Name: player2Name || null,
       failedPlayerIds: [],
+      lastWrongGuess: null,
+      roundWrongGuesses: [],
     });
   },
 
@@ -116,7 +207,14 @@ export const useGameStore = create<GameState>((set) => ({
       firstFoundType: null,
       firstFoundName: null,
       revealedTrack: null,
+      lastRoundResult: null,
       failedPlayerIds: [],
+      lastWrongGuess: null,
+      roundWrongGuesses: [],
+      isCustom: event.isCustom ?? state.isCustom,
+      lobbyCode: event.lobbyCode ?? state.lobbyCode,
+      playerScores: event.playerScores ?? state.playerScores,
+      leaderboard: event.leaderboard ?? state.leaderboard,
       player1Id: event.player1Id || state.player1Id,
       player2Id: event.player2Id || state.player2Id,
       player1Name: event.player1Name || state.player1Name,
@@ -135,47 +233,128 @@ export const useGameStore = create<GameState>((set) => ({
   },
 
   onFirstAnswerCorrect: (event) => {
-    set({
+    set((state) => ({
       phase: 'BONUS',
       firstFoundType: event.foundType,
       firstFoundName: event.foundName,
       bonusDurationSeconds: event.bonusDurationSeconds,
-      player1Score: event.currentScores.player1,
-      player2Score: event.currentScores.player2,
-    });
+      player1Score: event.currentScores?.player1 ?? state.player1Score,
+      player2Score: event.currentScores?.player2 ?? state.player2Score,
+      playerScores: event.playerScores ?? state.playerScores,
+      leaderboard: event.leaderboard ?? state.leaderboard,
+    }));
+  },
+
+  onAnswerWrong: (event) => {
+    const wrongEntry: WrongGuess = {
+      playerId: event.playerId,
+      playerName: event.playerName,
+      guess: event.guess,
+    };
+    set((state) => ({
+      lastWrongGuess: wrongEntry,
+      roundWrongGuesses: [...state.roundWrongGuesses, wrongEntry],
+    }));
   },
 
   onStealOpen: (event) => {
-    set((state) => ({
-      phase: 'PLAYING',
-      buzzerPlayerId: null,
-      buzzerName: null,
-      remainingAudioMs: event.remainingAudioMs,
-      failedPlayerIds: state.failedPlayerIds.includes(event.failedPlayerId)
-        ? state.failedPlayerIds
-        : [...state.failedPlayerIds, event.failedPlayerId],
-      ...(event.currentScores
-        ? {
-            player1Score: event.currentScores.player1,
-            player2Score: event.currentScores.player2,
-          }
-        : {}),
-      ...(event.firstFoundType ? { firstFoundType: event.firstFoundType } : {}),
-    }));
+    set((state) => {
+      let nextWrongGuesses = state.roundWrongGuesses;
+      let nextLastWrong = state.lastWrongGuess;
+
+      if (event.wrongGuess && event.failedPlayerName) {
+        const entry: WrongGuess = {
+          playerId: event.failedPlayerId,
+          playerName: event.failedPlayerName,
+          guess: event.wrongGuess,
+        };
+        nextLastWrong = entry;
+        const exists = state.roundWrongGuesses.some(
+          (w) => w.playerId === event.failedPlayerId && w.guess === event.wrongGuess
+        );
+        if (!exists) {
+          nextWrongGuesses = [...state.roundWrongGuesses, entry];
+        }
+      }
+
+      return {
+        phase: 'PLAYING',
+        buzzerPlayerId: null,
+        buzzerName: null,
+        remainingAudioMs: event.remainingAudioMs,
+        lastWrongGuess: nextLastWrong,
+        roundWrongGuesses: nextWrongGuesses,
+        failedPlayerIds: state.failedPlayerIds.includes(event.failedPlayerId)
+          ? state.failedPlayerIds
+          : [...state.failedPlayerIds, event.failedPlayerId],
+        ...(event.currentScores
+          ? {
+              player1Score: event.currentScores.player1,
+              player2Score: event.currentScores.player2,
+            }
+          : {}),
+        ...(event.playerScores ? { playerScores: event.playerScores } : {}),
+        ...(event.leaderboard ? { leaderboard: event.leaderboard } : {}),
+        ...(event.firstFoundType ? { firstFoundType: event.firstFoundType } : {}),
+      };
+    });
   },
 
   onRoundEnd: (event) => {
-    set((state) => ({
-      phase: 'REVEAL',
-      revealedTrack: event.track,
-      player1Score: event.scores.player1,
-      player2Score: event.scores.player2,
-      isLastRound: event.isLastRound,
-      player1Id: event.player1Id || state.player1Id,
-      player2Id: event.player2Id || state.player2Id,
-      player1Name: event.player1Name || state.player1Name,
-      player2Name: event.player2Name || state.player2Name,
-    }));
+    set((state) => {
+      const wrongGuesses =
+        event.wrongGuesses && event.wrongGuesses.length > 0
+          ? event.wrongGuesses
+          : state.roundWrongGuesses;
+
+      const historyItem: RoundHistoryItem = {
+        roundNumber: event.roundNumber,
+        title: event.track.title,
+        artist: event.track.artist,
+        albumName: event.track.albumName,
+        albumCoverUrl: event.track.albumCoverUrl,
+        previewUrl: event.track.previewUrl || state.audioUrl || undefined,
+        titleFound: Boolean(event.titleFound),
+        artistFound: Boolean(event.artistFound),
+        titleFoundByPlayerId: event.titleFoundByPlayerId || null,
+        artistFoundByPlayerId: event.artistFoundByPlayerId || null,
+        titleFoundByName: event.titleFoundByName,
+        artistFoundByName: event.artistFoundByName,
+        player1Score: event.scores.player1,
+        player2Score: event.scores.player2,
+        playerScores: event.playerScores,
+        wrongGuesses,
+      };
+
+      const filtered = state.roundHistory.filter((r) => r.roundNumber !== event.roundNumber);
+
+      return {
+        phase: 'REVEAL',
+        revealedTrack: event.track,
+        player1Score: event.scores.player1,
+        player2Score: event.scores.player2,
+        playerScores: event.playerScores ?? state.playerScores,
+        leaderboard: event.leaderboard ?? state.leaderboard,
+        isCustom: event.isCustom ?? state.isCustom,
+        lobbyCode: event.lobbyCode ?? state.lobbyCode,
+        isLastRound: event.isLastRound,
+        lastRoundResult: {
+          titleFound: Boolean(event.titleFound),
+          artistFound: Boolean(event.artistFound),
+          titleFoundByPlayerId: event.titleFoundByPlayerId || null,
+          artistFoundByPlayerId: event.artistFoundByPlayerId || null,
+          titleFoundByName: event.titleFoundByName,
+          artistFoundByName: event.artistFoundByName,
+          wrongGuesses,
+        },
+        roundWrongGuesses: wrongGuesses,
+        roundHistory: [...filtered, historyItem],
+        player1Id: event.player1Id || state.player1Id,
+        player2Id: event.player2Id || state.player2Id,
+        player1Name: event.player1Name || state.player1Name,
+        player2Name: event.player2Name || state.player2Name,
+      };
+    });
   },
 
   onMatchFinished: (event) => {
@@ -187,6 +366,11 @@ export const useGameStore = create<GameState>((set) => ({
         matchResult: event,
         player1Score: p1,
         player2Score: p2,
+        isCustom: event.isCustom ?? state.isCustom,
+        lobbyCode: event.lobbyCode ?? state.lobbyCode,
+        playerScores: event.playerScores ?? event.scores ?? state.playerScores,
+        leaderboard: event.leaderboard ?? state.leaderboard,
+        roundHistory: (event.roundHistory && event.roundHistory.length > 0) ? event.roundHistory : state.roundHistory,
         player1Id: event.player1Id || state.player1Id,
         player2Id: event.player2Id || state.player2Id,
         player1Name: event.player1Name || state.player1Name,
@@ -198,6 +382,9 @@ export const useGameStore = create<GameState>((set) => ({
   resetGame: () => {
     set({
       gameId: null,
+      isCustom: false,
+      lobbyCode: null,
+      activeLobby: null,
       phase: 'LOBBY',
       roundNumber: 0,
       audioUrl: null,
@@ -206,14 +393,21 @@ export const useGameStore = create<GameState>((set) => ({
       firstFoundType: null,
       firstFoundName: null,
       revealedTrack: null,
+      lastRoundResult: null,
+      roundHistory: [],
       matchResult: null,
       player1Id: null,
       player2Id: null,
       player1Name: null,
       player2Name: null,
       failedPlayerIds: [],
+      lastWrongGuess: null,
+      roundWrongGuesses: [],
       player1Score: 0,
       player2Score: 0,
+      playerScores: {},
+      leaderboard: [],
     });
   },
+
 }));

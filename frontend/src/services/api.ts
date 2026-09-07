@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Theme, User, UserThemeStats, MatchmakingStats } from '../types';
+import type { Theme, User, UserThemeStats, MatchmakingStats, LobbyData } from '../types';
 
 const rawApiUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8080/api/v1').trim().replace(/\/+$/, '');
 export const BACKEND_URL = rawApiUrl.replace(/\/api\/v1\/?$/, '');
@@ -81,6 +81,67 @@ export const userService = {
   },
   getLeaderboard: async (): Promise<User[]> => {
     const res = await api.get<User[]>('/users/leaderboard');
+    return res.data;
+  },
+};
+
+export const customLobbyService = {
+  createLobby: async (
+    host: { id: string; displayName: string; avatarUrl?: string; elo?: number },
+    themeId?: string,
+    themeName?: string,
+    roundsCount?: number
+  ): Promise<LobbyData> => {
+    const res = await api.post<LobbyData>('/lobby/create', {
+      hostId: host.id,
+      hostName: host.displayName,
+      avatarUrl: host.avatarUrl,
+      elo: host.elo,
+      themeId,
+      themeName,
+      roundsCount: roundsCount || 10,
+    });
+    return res.data;
+  },
+  joinLobby: async (
+    code: string,
+    user: { id: string; displayName: string; avatarUrl?: string; elo?: number }
+  ): Promise<LobbyData> => {
+    const res = await api.post<LobbyData>('/lobby/join', {
+      code,
+      userId: user.id,
+      displayName: user.displayName,
+      avatarUrl: user.avatarUrl,
+      elo: user.elo,
+    });
+    return res.data;
+  },
+  leaveLobby: async (code: string, userId: string): Promise<any> => {
+    const res = await api.post(`/lobby/${code}/leave?userId=${userId}`);
+    return res.data;
+  },
+  getLobby: async (code: string): Promise<LobbyData> => {
+    const res = await api.get<LobbyData>(`/lobby/${code}`);
+    return res.data;
+  },
+  updateSettings: async (
+    code: string,
+    data: {
+      requestingUserId: string;
+      themeId?: string;
+      themeName?: string;
+      roundsCount?: number;
+    }
+  ): Promise<LobbyData> => {
+    const res = await api.post<LobbyData>(`/lobby/${code}/settings`, data);
+    return res.data;
+  },
+  startGame: async (code: string, userId: string): Promise<LobbyData> => {
+    const res = await api.post<LobbyData>(`/lobby/${code}/start?userId=${userId}`);
+    return res.data;
+  },
+  returnToLobby: async (code: string, userId: string): Promise<LobbyData> => {
+    const res = await api.post<LobbyData>(`/lobby/${code}/return?userId=${userId}`);
     return res.data;
   },
 };

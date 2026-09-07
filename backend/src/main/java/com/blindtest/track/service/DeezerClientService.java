@@ -52,58 +52,83 @@ public class DeezerClientService {
 
     private record CachedPreview(String url, long expiresAt) {
         public boolean isExpired() {
-            return System.currentTimeMillis() > expiresAt;
+            return System.currentTimeMillis() > expiresAt || isUrlExpired(url);
         }
     }
 
     private final java.util.Map<Long, CachedPreview> previewCache = new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
+     * Vérifie si un lien CDN Deezer Akamai est expiré ou sur le point d'expirer (< 90 secondes).
+     */
+    public static boolean isUrlExpired(String url) {
+        if (url == null || url.isBlank()) return true;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("exp=([0-9]+)").matcher(url);
+        if (m.find()) {
+            try {
+                long expSeconds = Long.parseLong(m.group(1));
+                long nowSeconds = System.currentTimeMillis() / 1000L;
+                return (expSeconds - nowSeconds) < 90;
+            } catch (NumberFormatException ignored) {}
+        }
+        return false;
+    }
+
+    private RestClient createDeezerRestClient() {
+        return RestClient.builder()
+                .baseUrl(deezerBaseUrl)
+                .defaultHeader(org.springframework.http.HttpHeaders.USER_AGENT, "BeatRival/1.0 (BlindTest; DeezerAPI)")
+                .build();
+    }
+
+    /**
      * Garantit l'obtention d'un lien preview MP3 Deezer valide avec un token CDN actif (non expiré).
      */
     public String getFreshPreviewUrl(Track track) {
         if (track == null) return null;
-        if (track.getDeezerId() == null) {
-            return track.getPreviewUrl();
+
+        // 1. Vérifier le cache en mémoire (durée max 10 minutes avec vérification du token)
+        if (track.getDeezerId() != null) {
+            CachedPreview cached = previewCache.get(track.getDeezerId());
+            if (cached != null && !cached.isExpired()) {
+                return cached.url();
+            }
         }
 
-        // 1. Vérifier le cache en mémoire (durée 45 minutes)
-        CachedPreview cached = previewCache.get(track.getDeezerId());
-        if (cached != null && !cached.isExpired()) {
-            return cached.url();
-        }
+        RestClient restClient = createDeezerRestClient();
 
         // 2. Interroger Deezer API /track/{id} pour obtenir le token CDN fraîchement signé
-        try {
-            RestClient restClient = RestClient.builder()
-                    .baseUrl(deezerBaseUrl)
-                    .build();
+        if (track.getDeezerId() != null) {
+            try {
+                DeezerResponseDto.DeezerTrackItem item = restClient.get()
+                        .uri("/track/{id}", track.getDeezerId())
+                        .retrieve()
+                        .body(DeezerResponseDto.DeezerTrackItem.class);
 
-            DeezerResponseDto.DeezerTrackItem item = restClient.get()
-                    .uri("/track/{id}", track.getDeezerId())
-                    .retrieve()
-                    .body(DeezerResponseDto.DeezerTrackItem.class);
-
-            if (item != null && item.getPreview() != null && !item.getPreview().isBlank()) {
-                String freshUrl = item.getPreview();
-                previewCache.put(track.getDeezerId(), new CachedPreview(freshUrl, System.currentTimeMillis() + 45 * 60 * 1000L));
-                track.setPreviewUrl(freshUrl);
-                trackRepository.save(track);
-                log.info("Lien Deezer rafraîchi pour trackId={} (titre: '{}') : {}", track.getId(), track.getTitle(), freshUrl);
-                return freshUrl;
+                if (item != null && item.getPreview() != null && !item.getPreview().isBlank()) {
+                    String freshUrl = item.getPreview();
+                    previewCache.put(track.getDeezerId(), new CachedPreview(freshUrl, System.currentTimeMillis() + 10 * 60 * 1000L));
+                    track.setPreviewUrl(freshUrl);
+                    trackRepository.save(track);
+                    log.info("Lien Deezer rafraîchi pour trackId={} (titre: '{}') : {}", track.getId(), track.getTitle(), freshUrl);
+                    return freshUrl;
+                }
+            } catch (Exception e) {
+                log.warn("Impossible de rafraîchir le lien Deezer pour trackId={} (deezerId={}): {}",
+                        track.getId(), track.getDeezerId(), e.getMessage());
             }
-        } catch (Exception e) {
-            log.warn("Impossible de rafraîchir le lien Deezer pour trackId={} (deezerId={}): {}",
-                    track.getId(), track.getDeezerId(), e.getMessage());
         }
 
-        // 3. Recherche de secours sur Deezer si le trackId spécifique n'a plus de preview valide
+        // 3. Recherche de secours sur Deezer avec titre nettoyé si le trackId spécifique n'a plus de preview valide
         try {
-            RestClient restClient = RestClient.builder()
-                    .baseUrl(deezerBaseUrl)
-                    .build();
+            String cleanTitle = track.getTitle()
+                    .replaceAll("(?i)\\s*-\\s*remaster(ed)?.*$", "")
+                    .replaceAll("(?i)\\s*\\(remaster(ed)?.*\\)$", "")
+                    .replaceAll("(?i)\\s*\\(radio edit\\)$", "")
+                    .replaceAll("(?i)\\s*\\(live.*\\)$", "")
+                    .trim();
 
-            String queryParam = String.format("artist:\"%s\" track:\"%s\"", track.getArtist(), track.getTitle());
+            String queryParam = String.format("artist:\"%s\" track:\"%s\"", track.getArtist(), cleanTitle);
             DeezerResponseDto response = restClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path("/search")
@@ -117,7 +142,7 @@ public class DeezerClientService {
                 for (DeezerResponseDto.DeezerTrackItem fallbackItem : response.getData()) {
                     if (fallbackItem.getPreview() != null && !fallbackItem.getPreview().isBlank()) {
                         String freshUrl = fallbackItem.getPreview();
-                        previewCache.put(fallbackItem.getId(), new CachedPreview(freshUrl, System.currentTimeMillis() + 45 * 60 * 1000L));
+                        previewCache.put(fallbackItem.getId(), new CachedPreview(freshUrl, System.currentTimeMillis() + 10 * 60 * 1000L));
                         track.setDeezerId(fallbackItem.getId());
                         track.setPreviewUrl(freshUrl);
                         trackRepository.save(track);
@@ -129,6 +154,13 @@ public class DeezerClientService {
         } catch (Exception e) {
             log.warn("Recherche de secours Deezer échouée pour trackId={} (titre: '{}') : {}",
                     track.getId(), track.getTitle(), e.getMessage());
+        }
+
+        // Si le lien existant en base est expiré, NE PAS le retourner car il renverra un 403 Forbidden
+        if (isUrlExpired(track.getPreviewUrl())) {
+            log.warn("Aucun flux Deezer valide pour trackId={} ('{}' par '{}'). Le lien en base est expiré.",
+                    track.getId(), track.getTitle(), track.getArtist());
+            return null;
         }
 
         return track.getPreviewUrl();

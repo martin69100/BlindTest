@@ -33,6 +33,39 @@ export interface RevealedTrack {
   artist: string;
   albumName?: string;
   albumCoverUrl?: string;
+  previewUrl?: string;
+}
+
+export interface LeaderboardEntry {
+  playerId: string;
+  playerName: string;
+  avatarUrl?: string;
+  elo?: number;
+  score: number;
+}
+
+export interface LobbyParticipant {
+  userId: string;
+  displayName: string;
+  avatarUrl?: string;
+  elo: number;
+  isHost: boolean;
+  isReady: boolean;
+  lastGameScore?: number;
+  lastGameRank?: number;
+}
+
+export interface LobbyData {
+  code: string;
+  hostId: string;
+  hostName: string;
+  themeId?: string;
+  themeName?: string;
+  roundsCount: number;
+  status: 'WAITING' | 'PLAYING' | 'FINISHED';
+  activeGameId?: string;
+  participants: Record<string, LobbyParticipant>;
+  lastGameLeaderboard?: LeaderboardEntry[];
 }
 
 export interface RoundStartEvent {
@@ -44,10 +77,20 @@ export interface RoundStartEvent {
   previewUrl: string;
   durationSeconds: number;
   serverTimestamp: number;
+  isCustom?: boolean;
+  lobbyCode?: string;
   player1Id?: string;
   player2Id?: string;
   player1Name?: string;
   player2Name?: string;
+  playerScores?: Record<string, number>;
+  leaderboard?: LeaderboardEntry[];
+}
+
+export interface WrongGuess {
+  playerId: string;
+  playerName: string;
+  guess: string;
 }
 
 export interface PlayerBuzzedEvent {
@@ -64,23 +107,36 @@ export interface FirstAnswerCorrectEvent {
   foundType: 'TITLE' | 'ARTIST';
   foundName: string;
   bonusDurationSeconds: number;
-  currentScores: {
+  currentScores?: {
     player1: number;
     player2: number;
   };
+  playerScores?: Record<string, number>;
+  leaderboard?: LeaderboardEntry[];
 }
 
 export interface StealOpenEvent {
   event: 'ANSWER_FAILED_STEAL_OPEN';
   failedPlayerId: string;
+  failedPlayerName?: string;
+  wrongGuess?: string;
   remainingAudioMs: number;
   titleFound?: boolean;
   artistFound?: boolean;
-  firstFoundType?: string;
+  firstFoundType?: 'TITLE' | 'ARTIST' | null;
   currentScores?: {
     player1: number;
     player2: number;
   };
+  playerScores?: Record<string, number>;
+  leaderboard?: LeaderboardEntry[];
+}
+
+export interface AnswerWrongEvent {
+  event: 'ANSWER_WRONG';
+  playerId: string;
+  playerName: string;
+  guess: string;
 }
 
 export interface RoundEndEvent {
@@ -91,11 +147,41 @@ export interface RoundEndEvent {
     player1: number;
     player2: number;
   };
+  playerScores?: Record<string, number>;
+  leaderboard?: LeaderboardEntry[];
+  titleFound?: boolean;
+  artistFound?: boolean;
+  titleFoundByPlayerId?: string;
+  artistFoundByPlayerId?: string;
+  titleFoundByName?: string;
+  artistFoundByName?: string;
   isLastRound: boolean;
+  isCustom?: boolean;
+  lobbyCode?: string;
   player1Id?: string;
   player2Id?: string;
   player1Name?: string;
   player2Name?: string;
+  wrongGuesses?: WrongGuess[];
+}
+
+export interface RoundHistoryItem {
+  roundNumber: number;
+  title: string;
+  artist: string;
+  albumName?: string;
+  albumCoverUrl?: string;
+  previewUrl?: string;
+  titleFound: boolean;
+  artistFound: boolean;
+  titleFoundByPlayerId?: string | null;
+  artistFoundByPlayerId?: string | null;
+  titleFoundByName?: string;
+  artistFoundByName?: string;
+  player1Score?: number;
+  player2Score?: number;
+  playerScores?: Record<string, number>;
+  wrongGuesses?: WrongGuess[];
 }
 
 export interface MatchFinishedEvent {
@@ -113,6 +199,12 @@ export interface MatchFinishedEvent {
   player2Id?: string;
   player1Name?: string;
   player2Name?: string;
+  isCustom?: boolean;
+  lobbyCode?: string;
+  scores?: Record<string, number>;
+  playerScores?: Record<string, number>;
+  leaderboard?: LeaderboardEntry[];
+  roundHistory?: RoundHistoryItem[];
 }
 
 export interface MatchmakingStats {
@@ -120,3 +212,4 @@ export interface MatchmakingStats {
   inGame: number;
   activeMatches: number;
 }
+

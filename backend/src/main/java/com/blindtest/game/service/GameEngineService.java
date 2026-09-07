@@ -40,6 +40,7 @@ public class GameEngineService {
     private final EloCalculator eloCalculator;
     private final SimpMessagingTemplate messagingTemplate;
     private final com.blindtest.track.service.DeezerClientService deezerClientService;
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     @Value("${blindtest.game.rounds-per-match:10}")
     private int roundsPerMatch;
@@ -74,7 +75,7 @@ public class GameEngineService {
 
     public int getActivePlayersCount() {
         return activeSessions.values().stream()
-                .mapToInt(s -> s.isSolo() ? 1 : 2)
+                .mapToInt(s -> s.isSolo() ? 1 : (s.getPlayerIds() != null && !s.getPlayerIds().isEmpty() ? s.getPlayerIds().size() : 2))
                 .sum();
     }
 
@@ -98,6 +99,17 @@ public class GameEngineService {
                 .state(SessionState.WAITING_READY)
                 .build();
 
+        if (player1Id != null) {
+            session.getPlayerIds().add(player1Id);
+            session.getPlayerNames().put(player1Id, p1Name != null ? p1Name : "Joueur 1");
+            session.getPlayerScores().put(player1Id, 0);
+        }
+        if (player2Id != null) {
+            session.getPlayerIds().add(player2Id);
+            session.getPlayerNames().put(player2Id, p2Name != null ? p2Name : "Joueur 2");
+            session.getPlayerScores().put(player2Id, 0);
+        }
+
         activeSessions.put(gameId, session);
         log.info("Nouvelle session créée [gameId={}] P1: '{}', P2: '{}' (Solo={}).", gameId, p1Name, p2Name, session.isSolo());
 
@@ -106,6 +118,69 @@ public class GameEngineService {
             for (Track t : tracks) {
                 try {
                     deezerClientService.getFreshPreviewUrl(t);
+                    Thread.sleep(50);
+                } catch (Exception e) {
+                    log.warn("Pré-rafraîchissement ignoré pour track {}: {}", t.getId(), e.getMessage());
+                }
+            }
+        });
+
+        return session;
+    }
+
+    /**
+     * Initialise une nouvelle partie personnalisée (Multi-joueurs Lobby, sans impact ELO).
+     */
+    public GameSession createCustomMatch(String lobbyCode,
+                                         Collection<com.blindtest.lobby.model.LobbyParticipant> participants,
+                                         UUID themeId,
+                                         int roundsCount) {
+        int rounds = (roundsCount >= 3 && roundsCount <= 30) ? roundsCount : roundsPerMatch;
+        List<Track> tracks = selectTracksForGame(themeId, rounds);
+
+        UUID gameId = UUID.randomUUID();
+        List<com.blindtest.lobby.model.LobbyParticipant> partsList = new ArrayList<>(participants);
+
+        UUID p1Id = !partsList.isEmpty() ? partsList.get(0).getUserId() : null;
+        String p1Name = !partsList.isEmpty() ? partsList.get(0).getDisplayName() : "Joueur 1";
+        UUID p2Id = partsList.size() > 1 ? partsList.get(1).getUserId() : null;
+        String p2Name = partsList.size() > 1 ? partsList.get(1).getDisplayName() : null;
+
+        GameSession session = GameSession.builder()
+                .gameId(gameId)
+                .isCustom(true)
+                .lobbyCode(lobbyCode)
+                .player1Id(p1Id)
+                .player2Id(p2Id)
+                .player1Name(p1Name)
+                .player2Name(p2Name)
+                .themeId(themeId)
+                .playlist(tracks)
+                .currentRoundIndex(0)
+                .currentRoundId(UUID.randomUUID())
+                .state(SessionState.WAITING_READY)
+                .build();
+
+        for (com.blindtest.lobby.model.LobbyParticipant p : partsList) {
+            if (p.getUserId() != null) {
+                session.getPlayerIds().add(p.getUserId());
+                session.getPlayerNames().put(p.getUserId(), p.getDisplayName() != null ? p.getDisplayName() : "Joueur");
+                session.getPlayerAvatars().put(p.getUserId(), p.getAvatarUrl() != null ? p.getAvatarUrl() : "");
+                session.getPlayerElos().put(p.getUserId(), p.getElo());
+                session.getPlayerScores().put(p.getUserId(), 0);
+            }
+        }
+
+        activeSessions.put(gameId, session);
+        log.info("Session personnalisée créée [gameId={}, lobby={}] avec {} joueurs.",
+                gameId, lobbyCode, session.getPlayerIds().size());
+
+        // Pré-rafraîchissement asynchrone des morceaux Deezer
+        CompletableFuture.runAsync(() -> {
+            for (Track t : tracks) {
+                try {
+                    deezerClientService.getFreshPreviewUrl(t);
+                    Thread.sleep(50);
                 } catch (Exception e) {
                     log.warn("Pré-rafraîchissement ignoré pour track {}: {}", t.getId(), e.getMessage());
                 }
@@ -166,10 +241,14 @@ public class GameEngineService {
         Map<String, Object> roundStartPayload = Map.ofEntries(
                 entry("event", "ROUND_START"),
                 entry("gameId", gameId),
+                entry("isCustom", session.isCustom()),
+                entry("lobbyCode", session.getLobbyCode() != null ? session.getLobbyCode() : ""),
                 entry("player1Id", session.getPlayer1Id() != null ? session.getPlayer1Id().toString() : ""),
                 entry("player2Id", session.getPlayer2Id() != null ? session.getPlayer2Id().toString() : ""),
                 entry("player1Name", session.getPlayer1Name() != null ? session.getPlayer1Name() : ""),
                 entry("player2Name", session.getPlayer2Name() != null ? session.getPlayer2Name() : ""),
+                entry("playerScores", session.getPlayerScores()),
+                entry("leaderboard", buildLeaderboard(session)),
                 entry("roundId", session.getCurrentRoundId()),
                 entry("roundNumber", session.getCurrentRoundIndex() + 1),
                 entry("totalRounds", session.getPlaylist().size()),
@@ -190,18 +269,19 @@ public class GameEngineService {
 
         if (session.getState() == SessionState.WAITING_READY) {
             session.getReadyPlayers().add(playerId);
-            if (session.isSolo() || session.getReadyPlayers().size() >= 2) {
+            int totalRequired = session.getTotalPlayers();
+            if (session.isSolo() || session.getReadyPlayers().size() >= totalRequired) {
                 session.cancelScheduledTask();
                 startCurrentRound(gameId);
             } else {
-                // Délai de secours de 12s en versus au cas où le 2e joueur a une latence réseau
+                int waitSec = session.isCustom() ? 8 : 12;
                 session.setScheduledTask(scheduler.schedule(() -> {
                     GameSession s = getSession(gameId);
                     if (s != null && s.getState() == SessionState.WAITING_READY) {
-                        log.info("Délai d'attente du 2ème joueur écoulé pour gameId={}. Démarrage automatique de la 1ère manche.", gameId);
+                        log.info("Délai d'attente écoulé pour gameId={}. Démarrage automatique.", gameId);
                         startCurrentRound(gameId);
                     }
-                }, 12, TimeUnit.SECONDS));
+                }, waitSec, TimeUnit.SECONDS));
             }
         } else if (session.getState() == SessionState.PLAYING) {
             // Joueur reconnecté ou en retard : resynchroniser sans perturber le joueur actif
@@ -274,10 +354,14 @@ public class GameEngineService {
                 }
             }, firstGuessTimeoutSeconds, TimeUnit.SECONDS));
 
+            String buzzerName = session.getPlayerNames().getOrDefault(playerId,
+                    playerId.equals(session.getPlayer1Id()) ? session.getPlayer1Name() : session.getPlayer2Name());
+            if (buzzerName == null || buzzerName.isBlank()) buzzerName = "Joueur";
+
             Map<String, Object> buzzPayload = Map.of(
                     "event", "PLAYER_BUZZED",
                     "buzzerPlayerId", playerId,
-                    "buzzerName", playerId.equals(session.getPlayer1Id()) ? session.getPlayer1Name() : session.getPlayer2Name(),
+                    "buzzerName", buzzerName,
                     "inputTimeoutSeconds", firstGuessTimeoutSeconds,
                     "remainingAudioMs", remaining
             );
@@ -312,8 +396,10 @@ public class GameEngineService {
             session.addScore(playerId, 1);
             if (result.guessType() == GuessType.TITLE) {
                 session.setTitleFound(true);
+                session.setTitleFoundByPlayerId(playerId);
             } else {
                 session.setArtistFound(true);
+                session.setArtistFoundByPlayerId(playerId);
             }
             if (session.getFirstFoundType() == GuessType.NONE) {
                 session.setFirstFoundType(result.guessType());
@@ -336,7 +422,7 @@ public class GameEngineService {
                 GameSession s = getSession(gameId);
                 if (s != null && s.getState() == SessionState.BONUS_WINDOW) {
                     log.info("Expiration du bonus (10s) pour gameId={}. La main passe si possible.", gameId);
-                    handleFailedAttempt(gameId, s, playerId);
+                    handleFailedAttempt(gameId, s, playerId, "Bonus expiré");
                 }
             }, bonusDurationSeconds, TimeUnit.SECONDS));
 
@@ -346,14 +432,16 @@ public class GameEngineService {
                     "foundType", result.guessType().name(),
                     "foundName", result.matchedName(),
                     "bonusDurationSeconds", bonusDurationSeconds,
-                    "currentScores", Map.of("player1", session.getPlayer1Score(), "player2", session.getPlayer2Score())
+                    "currentScores", Map.of("player1", session.getPlayer1Score(), "player2", session.getPlayer2Score()),
+                    "playerScores", session.getPlayerScores(),
+                    "leaderboard", buildLeaderboard(session)
             );
             messagingTemplate.convertAndSend("/topic/game/" + gameId, correctPayload);
 
         } else {
             // Échec ou timeout de saisie du 1er essai -> La main passe si possible
             log.info("Saisie échouée pour joueur={} gameId={}. Application du vol de main.", playerId, gameId);
-            handleFailedAttempt(gameId, session, playerId);
+            handleFailedAttempt(gameId, session, playerId, rawGuess);
         }
     }
 
@@ -379,8 +467,10 @@ public class GameEngineService {
             session.addScore(playerId, 1); // +1 point bonus
             if (result.guessType() == GuessType.TITLE) {
                 session.setTitleFound(true);
+                session.setTitleFoundByPlayerId(playerId);
             } else {
                 session.setArtistFound(true);
+                session.setArtistFoundByPlayerId(playerId);
             }
             updateThemeStats(playerId, session.getThemeId(), false, true);
             log.info("Joueur {} a réussi le bonus (+1 pt) pour le morceau '{}' ! Titre et Artiste validés.", playerId, track.getTitle());
@@ -388,7 +478,7 @@ public class GameEngineService {
         } else {
             // Échec bonus : le joueur a trouvé l'un mais pas l'autre -> La main passe à l'autre joueur
             log.info("Joueur {} a échoué au bonus pour gameId={}. La main passe.", playerId);
-            handleFailedAttempt(gameId, session, playerId);
+            handleFailedAttempt(gameId, session, playerId, rawGuess);
         }
     }
 
@@ -398,16 +488,34 @@ public class GameEngineService {
      * la main passe à l'autre pendant le temps audio restant, et le premier joueur ne peut plus tenter.
      * Si les deux ont tenté sans trouver les deux, la manche se termine.
      */
-    private void handleFailedAttempt(UUID gameId, GameSession session, UUID playerId) {
+    private void handleFailedAttempt(UUID gameId, GameSession session, UUID playerId, String rawGuess) {
         session.cancelScheduledTask();
         session.getPlayersBuzzedInRound().add(playerId);
 
-        boolean canOpponentSteal = !session.isSolo()
-                && session.getPlayersBuzzedInRound().size() < 2
+        String playerName = session.getPlayerNames().getOrDefault(playerId,
+                playerId.equals(session.getPlayer1Id()) ? session.getPlayer1Name() : session.getPlayer2Name());
+        if (playerName == null || playerName.isBlank()) playerName = "Joueur";
+        String guessText = (rawGuess != null && !rawGuess.isBlank()) ? rawGuess.trim() : "Temps écoulé";
+
+        // Enregistrer la tentative ratée dans la manche
+        session.getWrongGuessesInRound().add(new GameSession.WrongGuessEntry(playerId, playerName, guessText));
+
+        // Diffuser immédiatement l'événement de mauvaise réponse pour que tout le monde la voie
+        Map<String, Object> wrongPayload = Map.of(
+                "event", "ANSWER_WRONG",
+                "playerId", playerId.toString(),
+                "playerName", playerName,
+                "guess", guessText
+        );
+        messagingTemplate.convertAndSend("/topic/game/" + gameId, wrongPayload);
+
+        int totalPlayers = session.getTotalPlayers();
+        boolean canOpponentSteal = totalPlayers > 1
+                && session.getPlayersBuzzedInRound().size() < totalPlayers
                 && session.getRoundRemainingDurationMs() > 1000;
 
         if (canOpponentSteal) {
-            // Relance de la manche pour l'adversaire avec le temps audio restant
+            // Relance de la manche pour les autres joueurs avec le temps audio restant
             session.setState(SessionState.PLAYING);
             session.setRoundStartTimestamp(System.currentTimeMillis());
             session.setCurrentBuzzerPlayerId(null);
@@ -423,18 +531,22 @@ public class GameEngineService {
                 }
             }, remainingSec, TimeUnit.SECONDS));
 
-            Map<String, Object> stealPayload = Map.of(
-                    "event", "ANSWER_FAILED_STEAL_OPEN",
-                    "failedPlayerId", playerId,
-                    "remainingAudioMs", session.getRoundRemainingDurationMs(),
-                    "titleFound", session.isTitleFound(),
-                    "artistFound", session.isArtistFound(),
-                    "firstFoundType", session.getFirstFoundType() != null ? session.getFirstFoundType().name() : "",
-                    "currentScores", Map.of("player1", session.getPlayer1Score(), "player2", session.getPlayer2Score())
+            Map<String, Object> stealPayload = Map.ofEntries(
+                    entry("event", "ANSWER_FAILED_STEAL_OPEN"),
+                    entry("failedPlayerId", playerId),
+                    entry("failedPlayerName", playerName),
+                    entry("wrongGuess", guessText),
+                    entry("remainingAudioMs", session.getRoundRemainingDurationMs()),
+                    entry("titleFound", session.isTitleFound()),
+                    entry("artistFound", session.isArtistFound()),
+                    entry("firstFoundType", session.getFirstFoundType() != null ? session.getFirstFoundType().name() : ""),
+                    entry("currentScores", Map.of("player1", session.getPlayer1Score(), "player2", session.getPlayer2Score())),
+                    entry("playerScores", session.getPlayerScores()),
+                    entry("leaderboard", buildLeaderboard(session))
             );
             messagingTemplate.convertAndSend("/topic/game/" + gameId, stealPayload);
         } else {
-            // Les deux ont tenté et n'ont pas trouvé les deux, ou plus de temps -> fin de manche
+            // Tous les joueurs ont tenté ou plus de temps -> fin de manche
             log.info("Fin de manche pour gameId={} (tentatives épuisées ou temps écoulé).", gameId);
             endRound(gameId);
         }
@@ -458,7 +570,7 @@ public class GameEngineService {
             // En versus : si le joueur avait la main (BUZZED ou BONUS_WINDOW), cela compte comme échec de sa tentative
             if (playerId.equals(session.getCurrentBuzzerPlayerId()) &&
                (session.getState() == SessionState.BUZZED || session.getState() == SessionState.BONUS_WINDOW)) {
-                handleFailedAttempt(gameId, session, playerId);
+                handleFailedAttempt(gameId, session, playerId, "Langue au chat");
             }
         }
     }
@@ -475,25 +587,70 @@ public class GameEngineService {
         session.setState(SessionState.ROUND_REVEAL);
         Track track = session.getCurrentTrack();
 
-        Map<String, Object> revealPayload = Map.of(
-                "event", "ROUND_END",
-                "roundNumber", session.getCurrentRoundIndex() + 1,
-                "player1Id", session.getPlayer1Id() != null ? session.getPlayer1Id().toString() : "",
-                "player2Id", session.getPlayer2Id() != null ? session.getPlayer2Id().toString() : "",
-                "player1Name", session.getPlayer1Name() != null ? session.getPlayer1Name() : "",
-                "player2Name", session.getPlayer2Name() != null ? session.getPlayer2Name() : "",
-                "track", Map.of(
+        String titleFoundByName = session.getTitleFoundByPlayerId() != null
+                ? session.getPlayerNames().getOrDefault(session.getTitleFoundByPlayerId(), "")
+                : "";
+        String artistFoundByName = session.getArtistFoundByPlayerId() != null
+                ? session.getPlayerNames().getOrDefault(session.getArtistFoundByPlayerId(), "")
+                : "";
+
+        Map<String, Integer> scoresStringMap = new HashMap<>();
+        session.getPlayerScores().forEach((k, v) -> scoresStringMap.put(k.toString(), v));
+
+        // Enregistrer la manche dans l'historique complet de la partie
+        GameSession.RoundHistoryEntry roundEntry = GameSession.RoundHistoryEntry.builder()
+                .roundNumber(session.getCurrentRoundIndex() + 1)
+                .title(track.getTitle())
+                .artist(track.getArtist())
+                .albumName(track.getAlbumName())
+                .albumCoverUrl(track.getAlbumCoverUrl())
+                .previewUrl(track.getPreviewUrl())
+                .titleFound(session.isTitleFound())
+                .artistFound(session.isArtistFound())
+                .titleFoundByPlayerId(session.getTitleFoundByPlayerId())
+                .artistFoundByPlayerId(session.getArtistFoundByPlayerId())
+                .titleFoundByName(titleFoundByName)
+                .artistFoundByName(artistFoundByName)
+                .player1Score(session.getPlayer1Score())
+                .player2Score(session.getPlayer2Score())
+                .playerScores(scoresStringMap)
+                .wrongGuesses(new ArrayList<>(session.getWrongGuessesInRound()))
+                .build();
+        session.getRoundHistory().add(roundEntry);
+
+        List<Map<String, Object>> leaderboard = buildLeaderboard(session);
+
+        Map<String, Object> revealPayload = Map.ofEntries(
+                entry("event", "ROUND_END"),
+                entry("isCustom", session.isCustom()),
+                entry("lobbyCode", session.getLobbyCode() != null ? session.getLobbyCode() : ""),
+                entry("roundNumber", session.getCurrentRoundIndex() + 1),
+                entry("player1Id", session.getPlayer1Id() != null ? session.getPlayer1Id().toString() : ""),
+                entry("player2Id", session.getPlayer2Id() != null ? session.getPlayer2Id().toString() : ""),
+                entry("player1Name", session.getPlayer1Name() != null ? session.getPlayer1Name() : ""),
+                entry("player2Name", session.getPlayer2Name() != null ? session.getPlayer2Name() : ""),
+                entry("track", Map.of(
                         "title", track.getTitle(),
                         "artist", track.getArtist(),
                         "albumName", track.getAlbumName() != null ? track.getAlbumName() : "",
-                        "albumCoverUrl", track.getAlbumCoverUrl() != null ? track.getAlbumCoverUrl() : ""
-                ),
-                "scores", Map.of(
+                        "albumCoverUrl", track.getAlbumCoverUrl() != null ? track.getAlbumCoverUrl() : "",
+                        "previewUrl", track.getPreviewUrl() != null ? track.getPreviewUrl() : ""
+                )),
+                entry("scores", Map.of(
                         "player1", session.getPlayer1Score(),
                         "player2", session.getPlayer2Score()
-                ),
-                "isLastRound", !session.hasMoreRounds(),
-                "autoAdvanceSeconds", 5
+                )),
+                entry("playerScores", session.getPlayerScores()),
+                entry("leaderboard", leaderboard),
+                entry("titleFound", session.isTitleFound()),
+                entry("artistFound", session.isArtistFound()),
+                entry("titleFoundByPlayerId", session.getTitleFoundByPlayerId() != null ? session.getTitleFoundByPlayerId().toString() : ""),
+                entry("artistFoundByPlayerId", session.getArtistFoundByPlayerId() != null ? session.getArtistFoundByPlayerId().toString() : ""),
+                entry("titleFoundByName", titleFoundByName),
+                entry("artistFoundByName", artistFoundByName),
+                entry("wrongGuesses", session.getWrongGuessesInRound()),
+                entry("isLastRound", !session.hasMoreRounds()),
+                entry("autoAdvanceSeconds", 5)
         );
 
         messagingTemplate.convertAndSend("/topic/game/" + gameId, revealPayload);
@@ -513,13 +670,34 @@ public class GameEngineService {
     }
 
     /**
-     * Forfait / Abandon de partie (Solo ou Versus).
+     * Forfait / Abandon de partie (Solo, Versus ou Custom).
      */
     @Transactional
     public void handleForfeit(UUID gameId, UUID forfeitPlayerId) {
-        GameSession session = activeSessions.remove(gameId);
+        GameSession session = activeSessions.get(gameId);
         if (session == null) return;
 
+        if (session.isCustom()) {
+            log.info("Joueur {} a quitté la partie personnalisée {}.", forfeitPlayerId, gameId);
+            session.getPlayerIds().remove(forfeitPlayerId);
+            session.getPlayerScores().remove(forfeitPlayerId);
+            List<Map<String, Object>> leaderboard = buildLeaderboard(session);
+            Map<String, Object> forfeitPayload = Map.of(
+                    "event", "PLAYER_FORFEIT_CUSTOM",
+                    "forfeitPlayerId", forfeitPlayerId.toString(),
+                    "leaderboard", leaderboard,
+                    "scores", session.getPlayerScores()
+            );
+            messagingTemplate.convertAndSend("/topic/game/" + gameId, forfeitPayload);
+            if (session.getPlayerIds().isEmpty()) {
+                activeSessions.remove(gameId);
+                session.cancelScheduledTask();
+                session.setState(SessionState.FINISHED);
+            }
+            return;
+        }
+
+        activeSessions.remove(gameId);
         session.cancelScheduledTask();
         session.setState(SessionState.FINISHED);
 
@@ -600,7 +778,7 @@ public class GameEngineService {
     }
 
     /**
-     * Clôture définitive du match à l'issue des 10 manches.
+     * Clôture définitive du match à l'issue de toutes les manches.
      */
     @Transactional
     public void finishMatch(UUID gameId) {
@@ -609,6 +787,41 @@ public class GameEngineService {
 
         session.cancelScheduledTask();
         session.setState(SessionState.FINISHED);
+
+        // Partie Personnalisée : ELO inchangé !
+        if (session.isCustom()) {
+            List<Map<String, Object>> leaderboard = buildLeaderboard(session);
+            Map<String, Object> customFinishedPayload = Map.ofEntries(
+                    entry("event", "MATCH_FINISHED"),
+                    entry("isCustom", true),
+                    entry("lobbyCode", session.getLobbyCode() != null ? session.getLobbyCode() : ""),
+                    entry("player1Id", session.getPlayer1Id() != null ? session.getPlayer1Id().toString() : ""),
+                    entry("player2Id", session.getPlayer2Id() != null ? session.getPlayer2Id().toString() : ""),
+                    entry("player1Name", session.getPlayer1Name() != null ? session.getPlayer1Name() : ""),
+                    entry("player2Name", session.getPlayer2Name() != null ? session.getPlayer2Name() : ""),
+                    entry("player1Score", session.getPlayer1Score()),
+                    entry("player2Score", session.getPlayer2Score()),
+                    entry("player1EloChange", 0),
+                    entry("player2EloChange", 0),
+                    entry("scores", session.getPlayerScores()),
+                    entry("playerScores", session.getPlayerScores()),
+                    entry("leaderboard", leaderboard),
+                    entry("roundHistory", session.getRoundHistory())
+            );
+
+            messagingTemplate.convertAndSend("/topic/game/" + gameId, customFinishedPayload);
+
+            if (session.getLobbyCode() != null) {
+                eventPublisher.publishEvent(new com.blindtest.lobby.model.CustomGameFinishedEvent(
+                        session.getLobbyCode(),
+                        gameId,
+                        session.getPlayerScores(),
+                        leaderboard
+                ));
+            }
+            log.info("Partie personnalisée terminée [gameId={}, lobby={}]", gameId, session.getLobbyCode());
+            return;
+        }
 
         if (!session.isSolo()) {
             User p1 = userRepository.findById(session.getPlayer1Id()).orElse(null);
@@ -661,7 +874,8 @@ public class GameEngineService {
                         entry("player1EloChange", eloRes.eloChangePlayer1()),
                         entry("player2EloChange", eloRes.eloChangePlayer2()),
                         entry("player1NewElo", eloRes.newEloPlayer1()),
-                        entry("player2NewElo", eloRes.newEloPlayer2())
+                        entry("player2NewElo", eloRes.newEloPlayer2()),
+                        entry("roundHistory", session.getRoundHistory())
                 );
 
                 messagingTemplate.convertAndSend("/topic/game/" + gameId, matchFinishedPayload);
@@ -672,7 +886,8 @@ public class GameEngineService {
         Map<String, Object> soloFinishedPayload = Map.of(
                 "event", "SOLO_MATCH_FINISHED",
                 "player1Score", session.getPlayer1Score(),
-                "finalScore", session.getPlayer1Score()
+                "finalScore", session.getPlayer1Score(),
+                "roundHistory", session.getRoundHistory()
         );
         messagingTemplate.convertAndSend("/topic/game/" + gameId, soloFinishedPayload);
     }
@@ -706,5 +921,21 @@ public class GameEngineService {
             return fallback;
         }
         return tracks;
+    }
+
+    public List<Map<String, Object>> buildLeaderboard(GameSession session) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        if (session == null || session.getPlayerIds() == null) return list;
+        for (UUID pid : session.getPlayerIds()) {
+            Map<String, Object> map = new HashMap<>();
+            map.put("playerId", pid.toString());
+            map.put("playerName", session.getPlayerNames().getOrDefault(pid, "Joueur"));
+            map.put("avatarUrl", session.getPlayerAvatars().getOrDefault(pid, ""));
+            map.put("elo", session.getPlayerElos().getOrDefault(pid, 1000));
+            map.put("score", session.getPlayerScores().getOrDefault(pid, 0));
+            list.add(map);
+        }
+        list.sort((a, b) -> Integer.compare((int) b.get("score"), (int) a.get("score")));
+        return list;
     }
 }

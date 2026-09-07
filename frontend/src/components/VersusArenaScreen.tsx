@@ -1,5 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { Swords, LogOut, Flag, AlertTriangle, SkipForward, Dumbbell, Timer } from 'lucide-react';
+import {
+  Swords,
+  LogOut,
+  Flag,
+  AlertTriangle,
+  SkipForward,
+  Dumbbell,
+  Timer,
+  X,
+  Users,
+  Zap,
+} from 'lucide-react';
 import { useGameStore } from '../store/useGameStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { wsService } from '../services/websocket';
@@ -21,17 +32,33 @@ export const VersusArenaScreen: React.FC = () => {
     player1Score,
     player2Score,
     isSolo,
+    isCustom,
+    leaderboard,
+    playerScores,
+    activeLobby,
+    failedPlayerIds,
+    buzzerPlayerId,
     remainingAudioMs,
+    lastWrongGuess,
     resetGame,
+    returnToCustomLobby,
   } = useGameStore();
   const { user } = useAuthStore();
 
-  const isPlayer2 = !isSolo && Boolean(user && player2Id && user.id === player2Id);
-  const myScore = isPlayer2 ? player2Score : player1Score;
+  const isPlayer2 = !isSolo && !isCustom && Boolean(user && player2Id && user.id === player2Id);
+  const myScore = isCustom && user && playerScores[user.id] !== undefined
+    ? playerScores[user.id]
+    : (isPlayer2 ? player2Score : player1Score);
   const opponentScore = isPlayer2 ? player1Score : player2Score;
   const opponentDisplayName = isSolo
     ? 'Score Max'
     : (isPlayer2 ? player1Name : player2Name) || 'Adversaire';
+
+  // Alerte réponse fausse d'un adversaire
+  const opponentWrongGuess =
+    !isSolo && lastWrongGuess && user && lastWrongGuess.playerId !== user.id
+      ? lastWrongGuess
+      : null;
 
   const [readySent, setReadySent] = useState(false);
   const [audioProgress, setAudioProgress] = useState(100);
@@ -76,10 +103,41 @@ export const VersusArenaScreen: React.FC = () => {
     if (isSolo) {
       wsService.sendForfeit(gameId, user.id);
       resetGame();
+    } else if (isCustom) {
+      wsService.sendForfeit(gameId, user.id);
+      returnToCustomLobby();
     } else {
       wsService.sendForfeit(gameId, user.id);
     }
   };
+
+  // Liste des participants ordonnée pour le tableau multijoueur
+  const multiplayerParticipants = React.useMemo(() => {
+    if (!isCustom) return [];
+
+    // Priorité au classement en direct du serveur
+    if (leaderboard && leaderboard.length > 0) {
+      return leaderboard;
+    }
+
+    // Sinon extraire depuis activeLobby
+    if (activeLobby?.participants) {
+      const list = Array.isArray(activeLobby.participants)
+        ? activeLobby.participants
+        : Object.values(activeLobby.participants);
+
+      return list
+        .map((p) => ({
+          playerId: p.userId,
+          playerName: p.displayName,
+          score: playerScores[p.userId] ?? p.lastGameScore ?? 0,
+          elo: p.elo ?? 1000,
+        }))
+        .sort((a, b) => b.score - a.score);
+    }
+
+    return [];
+  }, [isCustom, leaderboard, activeLobby, playerScores]);
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 flex flex-col items-center justify-between min-h-[85vh]">
@@ -93,11 +151,19 @@ export const VersusArenaScreen: React.FC = () => {
               className={`flex items-center space-x-1.5 px-3 py-1 rounded-full text-[11px] font-black tracking-wider uppercase border shadow-sm ${
                 isSolo
                   ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30'
+                  : isCustom
+                  ? 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
                   : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
               }`}
             >
-              {isSolo ? <Dumbbell className="w-3.5 h-3.5" /> : <Swords className="w-3.5 h-3.5" />}
-              <span>{isSolo ? 'Entraînement' : 'Versus Classé'}</span>
+              {isSolo ? (
+                <Dumbbell className="w-3.5 h-3.5" />
+              ) : isCustom ? (
+                <Users className="w-3.5 h-3.5 text-indigo-400" />
+              ) : (
+                <Swords className="w-3.5 h-3.5" />
+              )}
+              <span>{isSolo ? 'Entraînement' : isCustom ? 'Salon Privé (Sans ELO)' : 'Versus Classé'}</span>
             </div>
 
             {/* Badge Manche Actuelle */}
@@ -149,10 +215,10 @@ export const VersusArenaScreen: React.FC = () => {
             <button
               onClick={() => setShowForfeitModal(true)}
               className="flex items-center space-x-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 p-2 sm:px-3 sm:py-1.5 rounded-xl transition-all border border-transparent hover:border-rose-500/20 cursor-pointer text-xs font-semibold"
-              title={isSolo ? "Quitter l'entraînement" : "Abandonner la partie classée"}
+              title={isSolo ? "Quitter l'entraînement" : isCustom ? "Quitter le salon privé" : "Abandonner la partie classée"}
             >
               {isSolo ? <LogOut className="w-3.5 h-3.5" /> : <Flag className="w-3.5 h-3.5" />}
-              <span className="hidden sm:inline">{isSolo ? 'Quitter' : 'Abandonner'}</span>
+              <span className="hidden sm:inline">{isSolo ? 'Quitter' : isCustom ? 'Quitter' : 'Abandonner'}</span>
             </button>
           </div>
         </div>
@@ -170,36 +236,135 @@ export const VersusArenaScreen: React.FC = () => {
         </div>
       </div>
 
-      {/* Tableau des Scores Face à Face */}
-      <div className="w-full grid grid-cols-2 gap-4 mb-6">
-        {/* Joueur 1 (Moi) */}
-        <div className="bg-dark-900 border border-brand-500/30 rounded-2xl p-4 flex items-center justify-between shadow-lg">
-          <div>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Vous</p>
-            <h4 className="text-sm sm:text-base font-black text-white truncate max-w-[120px]">
-              {user?.displayName || 'Joueur'}
-            </h4>
+      {/* Tableau des Scores : Multijoueur Personnalisé VS 1v1 Classé */}
+      {isCustom && multiplayerParticipants.length > 0 ? (
+        <div className="w-full bg-dark-900/80 border border-slate-800/80 rounded-2xl p-3.5 mb-6 shadow-xl">
+          <div className="flex items-center justify-between mb-2.5 px-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 flex items-center space-x-1.5">
+              <Users className="w-3.5 h-3.5" />
+              <span>Classement en direct ({multiplayerParticipants.length} joueurs)</span>
+            </span>
+            <span className="text-[10px] text-slate-500 font-mono">
+              Score &bull; Rang ELO affiché
+            </span>
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-brand-400 bg-brand-500/10 px-4 py-1.5 rounded-xl border border-brand-500/30">
-            {myScore}
-          </div>
-        </div>
 
-        {/* Joueur 2 (Adversaire ou Cible Solo) */}
-        <div className="bg-dark-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-lg">
-          <div>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-              {isSolo ? 'Objectif' : 'Adversaire'}
-            </p>
-            <h4 className="text-sm sm:text-base font-black text-slate-300 truncate max-w-[120px]">
-              {opponentDisplayName}
-            </h4>
-          </div>
-          <div className="text-2xl sm:text-3xl font-black text-slate-400 bg-dark-800 px-4 py-1.5 rounded-xl border border-slate-700">
-            {isSolo ? totalRounds * 2 : opponentScore}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
+            {multiplayerParticipants.map((p, idx) => {
+              const isMe = user && p.playerId === user.id;
+              const hasFailed = failedPlayerIds?.includes(p.playerId);
+              const isCurrentBuzzer = buzzerPlayerId === p.playerId;
+
+              return (
+                <div
+                  key={p.playerId}
+                  className={`relative p-2.5 rounded-xl border transition-all flex items-center justify-between ${
+                    isMe
+                      ? 'bg-brand-600/15 border-brand-500/60 shadow-md shadow-brand-500/10'
+                      : 'bg-dark-950/60 border-slate-800/80'
+                  }`}
+                >
+                  <div className="flex items-center space-x-2 min-w-0 flex-1 pr-1.5">
+                    {/* Badge de rang */}
+                    <div className="w-5 h-5 rounded-md bg-dark-800 border border-slate-700/80 flex items-center justify-center font-black text-[10px] text-slate-300 shrink-0">
+                      {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : idx + 1}
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center space-x-1">
+                        <span className={`text-xs font-black truncate ${isMe ? 'text-white' : 'text-slate-300'}`}>
+                          {p.playerName}
+                        </span>
+                        {isMe && (
+                          <span className="text-[9px] font-extrabold bg-brand-500/30 text-brand-300 px-1 rounded shrink-0">
+                            Moi
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Statuts temps réel (Buzzer ou Erreur sur cette manche) */}
+                      <div className="flex items-center space-x-1 mt-0.5">
+                        {isCurrentBuzzer ? (
+                          <span className="text-[9px] font-bold text-rose-400 bg-rose-500/20 px-1.5 py-0.2 rounded animate-pulse flex items-center space-x-0.5">
+                            <Zap className="w-2.5 h-2.5" />
+                            <span>Buzzer</span>
+                          </span>
+                        ) : hasFailed ? (
+                          <span className="text-[9px] font-semibold text-rose-500/80 bg-rose-500/10 px-1 rounded line-through">
+                            Bloqué
+                          </span>
+                        ) : (
+                          <span className="text-[9px] text-amber-400/80 font-mono">
+                            {p.elo || 1000} ELO
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Score */}
+                  <div className="text-base font-black font-mono text-brand-400 bg-dark-800/90 px-2.5 py-0.5 rounded-lg border border-slate-700/60 shrink-0">
+                    {p.score ?? 0}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
-      </div>
+      ) : (
+        /* Tableau des Scores Face à Face (1v1 ou Solo) */
+        <div className="w-full grid grid-cols-2 gap-4 mb-6">
+          {/* Joueur 1 (Moi) */}
+          <div className="bg-dark-900 border border-brand-500/30 rounded-2xl p-4 flex items-center justify-between shadow-lg">
+            <div>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Vous</p>
+              <h4 className="text-sm sm:text-base font-black text-white truncate max-w-[120px]">
+                {user?.displayName || 'Joueur'}
+              </h4>
+            </div>
+            <div className="text-2xl sm:text-3xl font-black text-brand-400 bg-brand-500/10 px-4 py-1.5 rounded-xl border border-brand-500/30">
+              {myScore}
+            </div>
+          </div>
+
+          {/* Joueur 2 (Adversaire ou Cible Solo) */}
+          <div className="bg-dark-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-lg">
+            <div>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                {isSolo ? 'Objectif' : 'Adversaire'}
+              </p>
+              <h4 className="text-sm sm:text-base font-black text-slate-300 truncate max-w-[120px]">
+                {opponentDisplayName}
+              </h4>
+            </div>
+            <div className="text-2xl sm:text-3xl font-black text-slate-400 bg-dark-800 px-4 py-1.5 rounded-xl border border-slate-700">
+              {isSolo ? totalRounds * 2 : opponentScore}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Alerte en temps réel : Réponse fausse d'un adversaire */}
+      {opponentWrongGuess && phase !== 'REVEAL' && phase !== 'FINISHED' && (
+        <div className="w-full max-w-md mb-4 bg-rose-500/10 border border-rose-500/40 rounded-2xl px-4 py-3 flex items-center justify-between shadow-lg shadow-rose-500/10 animate-in fade-in slide-in-from-top-2 duration-300">
+          <div className="flex items-center space-x-3 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0 border border-rose-500/30">
+              <X className="w-4 h-4 stroke-[3]" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] font-extrabold text-rose-400 uppercase tracking-wider">
+                {opponentWrongGuess.playerName || 'Un adversaire'} s'est trompé
+              </p>
+              <p className="text-sm font-black text-white truncate">
+                « {opponentWrongGuess.guess} »
+              </p>
+            </div>
+          </div>
+          <span className="text-[10px] font-black uppercase bg-rose-500/20 text-rose-300 border border-rose-500/30 px-2.5 py-1 rounded-full shrink-0 ml-2">
+            Faux
+          </span>
+        </div>
+      )}
 
       {/* Scène Centrale Dynamique */}
       <div className="w-full flex-1 flex flex-col items-center justify-center my-4">
@@ -228,9 +393,13 @@ export const VersusArenaScreen: React.FC = () => {
         )}
       </div>
 
-      {/* Règle Option A / Info Vol de Main */}
+      {/* Règle & Info Vol de Main */}
       <div className="text-center text-[11px] text-slate-500 font-medium">
-        <span>Règle : 1er buzz valide Titre ou Artiste (+1 pt) &bull; Bonus 10s pour la 2ème info (+1 pt) &bull; Vol de main actif</span>
+        <span>
+          {isCustom
+            ? 'Règle : 1er buzz valide Titre ou Artiste (+1 pt) • Bonus 10s pour la 2ème info (+1 pt) • Vol de main ouvert • ELO protégé'
+            : 'Règle : 1er buzz valide Titre ou Artiste (+1 pt) • Bonus 10s pour la 2ème info (+1 pt) • Vol de main actif'}
+        </span>
       </div>
 
       {/* Modale de confirmation d'abandon / arrêt de session */}
@@ -242,12 +411,18 @@ export const VersusArenaScreen: React.FC = () => {
             </div>
 
             <h3 className="text-lg font-black text-white mb-2">
-              {isSolo ? "Arrêter l'entraînement ?" : 'Abandonner la partie classée ?'}
+              {isSolo
+                ? "Arrêter l'entraînement ?"
+                : isCustom
+                ? "Quitter le salon privé ?"
+                : "Abandonner la partie classée ?"}
             </h3>
 
             <p className="text-xs text-slate-400 mb-6">
               {isSolo
                 ? 'Vous reviendrez au salon principal. Votre score de cette session ne sera pas perdu.'
+                : isCustom
+                ? 'Vous retournerez au salon privé. Vos amis pourront continuer la partie et votre rang ELO ne sera pas impacté.'
                 : 'Attention : abandonner une partie classée sera comptabilisé comme une défaite et réduira votre ELO.'}
             </p>
 
@@ -262,7 +437,7 @@ export const VersusArenaScreen: React.FC = () => {
                 onClick={handleConfirmForfeit}
                 className="flex-1 bg-rose-600 hover:bg-rose-500 text-white font-bold py-2.5 rounded-xl text-xs transition-colors shadow-lg shadow-rose-600/30 cursor-pointer"
               >
-                {isSolo ? 'Quitter' : 'Confirmer l’abandon'}
+                {isSolo ? 'Quitter' : isCustom ? 'Quitter le salon' : 'Confirmer l’abandon'}
               </button>
             </div>
           </div>
