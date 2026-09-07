@@ -114,3 +114,9 @@ export interface MatchFinishedEvent {
   player1Name?: string;
   player2Name?: string;
 }
+
+export interface MatchmakingStats {
+  inQueue: number;
+  inGame: number;
+  activeMatches: number;
+}

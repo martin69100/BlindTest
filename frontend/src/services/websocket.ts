@@ -94,6 +94,43 @@ class WebSocketService {
     });
   }
 
+  public subscribeToMatchmakingStats(onMessage: (stats: any) => void) {
+    let sub: any = null;
+    let cancelled = false;
+
+    const doSubscribe = () => {
+      if (cancelled || !this.client) return;
+      sub = this.client.subscribe('/topic/matchmaking/stats', (msg: IMessage) => {
+        try {
+          onMessage(JSON.parse(msg.body));
+        } catch (e) {
+          console.error('Erreur parsing payload matchmaking stats :', e);
+        }
+      });
+    };
+
+    if (!this.client || !this.isConnected) {
+      this.connect(() => {
+        doSubscribe();
+      });
+    } else {
+      doSubscribe();
+    }
+
+    return {
+      unsubscribe: () => {
+        cancelled = true;
+        if (sub) {
+          try {
+            sub.unsubscribe();
+          } catch (e) {
+            // Ignorer à la fermeture
+          }
+        }
+      }
+    };
+  }
+
   public sendReady(gameId: string, playerId: string) {
     this.send(`/app/game/${gameId}/ready`, { playerId });
   }

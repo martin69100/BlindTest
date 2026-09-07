@@ -2,6 +2,7 @@ package com.blindtest.matchmaking.service;
 
 import com.blindtest.game.model.GameSession;
 import com.blindtest.game.service.GameEngineService;
+import com.blindtest.matchmaking.model.MatchmakingStats;
 import com.blindtest.matchmaking.model.MatchmakingTicket;
 import com.blindtest.user.entity.User;
 import com.blindtest.user.repository.UserRepository;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 @RequiredArgsConstructor
@@ -39,6 +41,24 @@ public class MatchmakingService {
     // File d'attente thread-safe
     private final List<MatchmakingTicket> queue = new CopyOnWriteArrayList<>();
 
+    // Suivi du dernier état diffusé pour éviter de saturer le broker
+    private final AtomicInteger lastBroadcastInQueue = new AtomicInteger(-1);
+    private final AtomicInteger lastBroadcastInGame = new AtomicInteger(-1);
+
+    public MatchmakingStats getStats() {
+        int inQueue = queue.size();
+        int inGame = gameEngineService.getActivePlayersCount();
+        int activeMatches = gameEngineService.getActiveGamesCount();
+        return new MatchmakingStats(inQueue, inGame, activeMatches);
+    }
+
+    public void broadcastStats() {
+        MatchmakingStats stats = getStats();
+        lastBroadcastInQueue.set(stats.inQueue());
+        lastBroadcastInGame.set(stats.inGame());
+        messagingTemplate.convertAndSend("/topic/matchmaking/stats", stats);
+    }
+
     public synchronized boolean joinQueue(UUID userId, UUID preferredThemeId) {
         // Éviter les doublons
         queue.removeIf(ticket -> ticket.userId().equals(userId));
@@ -56,11 +76,16 @@ public class MatchmakingService {
 
         queue.add(ticket);
         log.info("Joueur '{}' [ELO={}] a rejoint la file de matchmaking (Thème={}).", user.getDisplayName(), user.getElo(), preferredThemeId);
+        broadcastStats();
         return true;
     }
 
     public synchronized boolean leaveQueue(UUID userId) {
-        return queue.removeIf(ticket -> ticket.userId().equals(userId));
+        boolean removed = queue.removeIf(ticket -> ticket.userId().equals(userId));
+        if (removed) {
+            broadcastStats();
+        }
+        return removed;
     }
 
     public boolean isInQueue(UUID userId) {
@@ -72,6 +97,12 @@ public class MatchmakingService {
      */
     @Scheduled(fixedRateString = "${blindtest.matchmaking.scheduler-period-ms:1000}")
     public synchronized void processMatchmaking() {
+        // Détecter un changement d'état (ex: partie terminée, nouveau joueur) et diffuser
+        MatchmakingStats currentStats = getStats();
+        if (currentStats.inQueue() != lastBroadcastInQueue.get() || currentStats.inGame() != lastBroadcastInGame.get()) {
+            broadcastStats();
+        }
+
         if (queue.size() < 2) {
             return;
         }
@@ -142,6 +173,10 @@ public class MatchmakingService {
                 messagingTemplate.convertAndSend("/topic/matchmaking/" + t1.userId(), matchNotification);
                 messagingTemplate.convertAndSend("/topic/matchmaking/" + bestMatch.userId(), matchNotification);
             }
+        }
+
+        if (!matchedInCycle.isEmpty()) {
+            broadcastStats();
         }
     }
 }

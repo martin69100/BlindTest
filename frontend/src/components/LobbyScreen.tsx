@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Swords, Dumbbell, Sparkles, Disc, Flame, Music, Radio, Mic, ChevronRight } from 'lucide-react';
-import type { Theme } from '../types';
+import { Swords, Dumbbell, Sparkles, Disc, Flame, Music, Radio, Mic, ChevronRight, Users } from 'lucide-react';
+import type { Theme, MatchmakingStats } from '../types';
 import { themeService, matchmakingService, soloService, GOOGLE_AUTH_URL } from '../services/api';
 import { useAuthStore } from '../store/useAuthStore';
 import { useGameStore } from '../store/useGameStore';
@@ -23,6 +23,11 @@ export const LobbyScreen: React.FC = () => {
   const [themes, setThemes] = useState<Theme[]>(DEFAULT_THEMES);
   const [selectedThemeId, setSelectedThemeId] = useState<string | null>(null);
   const [isSearchingMatch, setIsSearchingMatch] = useState(false);
+  const [matchStats, setMatchStats] = useState<MatchmakingStats>({
+    inQueue: 0,
+    inGame: 0,
+    activeMatches: 0,
+  });
 
   useEffect(() => {
     themeService.getThemes()
@@ -32,6 +37,27 @@ export const LobbyScreen: React.FC = () => {
       .catch((err) => {
         console.warn("Backend non encore connecté, utilisation des thèmes locaux :", err.message);
       });
+  }, []);
+
+  // Récupération initiale et écoute en temps réel des joueurs en recherche et en jeu
+  useEffect(() => {
+    matchmakingService.getStats()
+      .then((data) => {
+        if (data) setMatchStats(data);
+      })
+      .catch((err) => {
+        console.warn("Impossible de charger les stats matchmaking :", err.message);
+      });
+
+    const sub = wsService.subscribeToMatchmakingStats((stats: MatchmakingStats) => {
+      setMatchStats(stats);
+    });
+
+    return () => {
+      if (sub && typeof sub.unsubscribe === 'function') {
+        sub.unsubscribe();
+      }
+    };
   }, []);
 
   // Souscription STOMP au canal de matchmaking si connecté
@@ -94,6 +120,7 @@ export const LobbyScreen: React.FC = () => {
     return (
       <MatchmakingRadarScreen
         themeName={activeTheme ? activeTheme.name : 'Tous thèmes confondus'}
+        stats={matchStats}
         onCancel={() => setIsSearchingMatch(false)}
       />
     );
@@ -206,10 +233,23 @@ export const LobbyScreen: React.FC = () => {
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-brand-600 to-rose-600 flex items-center justify-center mb-6 shadow-lg shadow-brand-500/30">
               <Swords className="w-7 h-7 text-white" />
             </div>
-            <span className="text-[11px] font-extrabold uppercase tracking-wider text-rose-400 bg-rose-500/10 px-3 py-1 rounded-full border border-rose-500/20">
-              Compétitif &bull; ELO
-            </span>
-            <h3 className="text-2xl font-black text-white mt-3 mb-2">Mode Versus Classé</h3>
+            <div className="flex flex-wrap items-center gap-2 mb-4">
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-rose-400 bg-rose-500/10 px-3 py-1 rounded-full border border-rose-500/20">
+                Compétitif &bull; ELO
+              </span>
+              <div className="flex items-center space-x-1.5 bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-1 rounded-full text-[11px] font-bold text-emerald-400">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span>{matchStats.inQueue} en recherche</span>
+              </div>
+              <div className="flex items-center space-x-1.5 bg-indigo-500/10 border border-indigo-500/25 px-2.5 py-1 rounded-full text-[11px] font-bold text-indigo-300">
+                <Users className="w-3.5 h-3.5 text-indigo-400" />
+                <span>{matchStats.inGame} en partie</span>
+              </div>
+            </div>
+            <h3 className="text-2xl font-black text-white mb-2">Mode Versus Classé</h3>
             <p className="text-xs sm:text-sm text-slate-400 mb-6">
               Affrontez un adversaire en temps réel. 10 manches de 20s. Buzzer ultra-réactif, vol de main et calcul d'ELO à l'issue de la partie.
             </p>

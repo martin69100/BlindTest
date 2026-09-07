@@ -1,5 +1,6 @@
 package com.blindtest.matchmaking.controller;
 
+import com.blindtest.matchmaking.model.MatchmakingStats;
 import com.blindtest.matchmaking.service.MatchmakingService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -47,5 +48,10 @@ public class MatchmakingController {
                 "inQueue", inQueue,
                 "userId", userId
         ));
+    }
+
+    @GetMapping("/stats")
+    public ResponseEntity<MatchmakingStats> getStats() {
+        return ResponseEntity.ok(matchmakingService.getStats());
     }
 }

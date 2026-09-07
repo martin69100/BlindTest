@@ -1,22 +1,45 @@
 import React, { useState, useEffect } from 'react';
-import { Radar, X, Sparkles } from 'lucide-react';
+import { Radar, X, Sparkles, Users } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 import { matchmakingService } from '../services/api';
+import { wsService } from '../services/websocket';
+import type { MatchmakingStats } from '../types';
 
 interface Props {
   themeName: string;
+  stats?: MatchmakingStats;
   onCancel: () => void;
 }
 
-export const MatchmakingRadarScreen: React.FC<Props> = ({ themeName, onCancel }) => {
+export const MatchmakingRadarScreen: React.FC<Props> = ({ themeName, stats, onCancel }) => {
   const { user } = useAuthStore();
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [matchStats, setMatchStats] = useState<MatchmakingStats>(
+    stats || { inQueue: 1, inGame: 0, activeMatches: 0 }
+  );
+
+  useEffect(() => {
+    if (stats) {
+      setMatchStats(stats);
+    }
+  }, [stats]);
 
   useEffect(() => {
     const timer = setInterval(() => {
       setElapsedSeconds((prev) => prev + 1);
     }, 1000);
     return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const sub = wsService.subscribeToMatchmakingStats((updatedStats: MatchmakingStats) => {
+      setMatchStats(updatedStats);
+    });
+    return () => {
+      if (sub && typeof sub.unsubscribe === 'function') {
+        sub.unsubscribe();
+      }
+    };
   }, []);
 
   // Formule d'élargissement : delta = min(50 + floor(t/3)*25, 300)
@@ -53,19 +76,41 @@ export const MatchmakingRadarScreen: React.FC<Props> = ({ themeName, onCancel })
         Thème sélectionné : <span className="text-brand-400 font-bold">{themeName}</span>
       </p>
 
-      {/* Box Plage ELO dynamique */}
-      <div className="bg-dark-900 border border-slate-800 rounded-2xl p-4 max-w-sm w-full mb-8 shadow-inner">
+      {/* Box Plage ELO dynamique & Joueurs en direct */}
+      <div className="bg-dark-900 border border-slate-800 rounded-2xl p-4 max-w-sm w-full mb-8 shadow-inner text-left">
         <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
           <span>Temps d'attente</span>
           <span className="font-mono font-bold text-white">{elapsedSeconds}s</span>
         </div>
         <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
           <span>Plage de recherche ELO</span>
-          <span className="font-bold text-brand-400">±{currentDelta} pts</span>
+          <span className="font-bold text-brand-400">&plusmn;{currentDelta} pts</span>
         </div>
-        <div className="flex items-center justify-between text-xs text-slate-400">
+        <div className="flex items-center justify-between text-xs text-slate-400 mb-3">
           <span>Cibles admissibles</span>
           <span className="font-mono font-semibold text-slate-200">[{minElo} - {maxElo}]</span>
+        </div>
+
+        <div className="border-t border-slate-800/80 pt-2.5 space-y-2">
+          <div className="flex items-center justify-between text-xs text-slate-400">
+            <span className="flex items-center space-x-1.5">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <span>Joueurs en recherche</span>
+            </span>
+            <span className="font-mono font-bold text-emerald-400">{Math.max(1, matchStats.inQueue)}</span>
+          </div>
+          <div className="flex items-center justify-between text-xs text-slate-400">
+            <span className="flex items-center space-x-1.5">
+              <Users className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Joueurs en partie</span>
+            </span>
+            <span className="font-mono font-bold text-indigo-400">
+              {matchStats.inGame} {matchStats.activeMatches > 0 && <span className="text-[10px] text-slate-500 font-normal">({matchStats.activeMatches} match{matchStats.activeMatches > 1 ? 's' : ''})</span>}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -83,3 +128,4 @@ export const MatchmakingRadarScreen: React.FC<Props> = ({ themeName, onCancel })
     </div>
   );
 };
+

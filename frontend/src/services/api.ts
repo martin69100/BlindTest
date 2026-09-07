@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Theme, User, UserThemeStats } from '../types';
+import type { Theme, User, UserThemeStats, MatchmakingStats } from '../types';
 
 const rawApiUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8080/api/v1').trim().replace(/\/+$/, '');
 export const BACKEND_URL = rawApiUrl.replace(/\/api\/v1\/?$/, '');
@@ -52,6 +52,10 @@ export const matchmakingService = {
   },
   getStatus: async (userId: string) => {
     const res = await api.get(`/matchmaking/status?userId=${userId}`);
+    return res.data;
+  },
+  getStats: async (): Promise<MatchmakingStats> => {
+    const res = await api.get<MatchmakingStats>('/matchmaking/stats');
     return res.data;
   },
 };

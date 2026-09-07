@@ -68,6 +68,16 @@ public class GameEngineService {
         return activeSessions.get(gameId);
     }
 
+    public int getActiveGamesCount() {
+        return activeSessions.size();
+    }
+
+    public int getActivePlayersCount() {
+        return activeSessions.values().stream()
+                .mapToInt(s -> s.isSolo() ? 1 : 2)
+                .sum();
+    }
+
     /**
      * Initialise une nouvelle partie en mode Versus (Classé) ou Solo.
      */
