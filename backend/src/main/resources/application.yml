@@ -56,3 +56,10 @@ blindtest:
     scheduler-period-ms: 1000
   deezer:
     base-url: https://api.deezer.com
+    theme-playlists:
+      ANNEES_80: 867825522
+      ANNEES_60: 908622995
+      ROCK: 1306931615
+      RAP_FR: 2918278382
+      POP: 1036183001
+      ANNEES_2000: 751764391

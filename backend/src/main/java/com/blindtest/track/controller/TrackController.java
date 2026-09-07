@@ -28,6 +28,21 @@ public class TrackController {
         ));
     }
 
+    @PostMapping("/import-playlist")
+    public ResponseEntity<Map<String, Object>> importPlaylist(
+            @RequestParam String themeCode,
+            @RequestParam long playlistId,
+            @RequestParam(defaultValue = "60") int limit
+    ) {
+        int imported = deezerClientService.importTracksFromPlaylist(themeCode, playlistId, limit);
+        return ResponseEntity.ok(Map.of(
+                "themeCode", themeCode,
+                "playlistId", playlistId,
+                "importedCount", imported,
+                "status", "SUCCESS"
+        ));
+    }
+
     @PostMapping("/seed-all")
     public ResponseEntity<Map<String, String>> seedAllThemes() {
         deezerClientService.seedInitialTracksIfEmpty();
