@@ -506,16 +506,17 @@ public class DeezerClientService {
     }
 
     /**
-     * Initialisation au démarrage si la base est vide.
+     * Initialisation au démarrage : synchronise les morceaux si la base est vide ou contient un catalogue obsolète (< 200 titres).
      */
     @Transactional
     public void seedInitialTracksIfEmpty() {
-        if (trackRepository.count() > 0) {
-            log.info("La base contient déjà des morceaux ({} titres).", trackRepository.count());
+        long currentCount = trackRepository.count();
+        if (currentCount >= 200) {
+            log.info("La base contient déjà le catalogue dynamique complet ({} titres).", currentCount);
             return;
         }
 
-        log.info("Base de données vide : lancement de l'importation des morceaux cultes...");
+        log.info("Base de données contenant un catalogue incomplet ou ancien ({} titres) : lancement du peuplement dynamique des playlists...", currentCount);
         reseedCuratedCatalogue();
     }
 }
