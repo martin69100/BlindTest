@@ -5,9 +5,15 @@ import { useAuthStore } from '../store/useAuthStore';
 import { wsService } from '../services/websocket';
 
 export const SecureAudioPlayer: React.FC = () => {
-  const { audioUrl, phase, gameId } = useGameStore();
+  const { audioUrl, phase, gameId, roundNumber, remainingAudioMs } = useGameStore();
   const { user } = useAuthStore();
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Mémorisation de la manche et de l'URL pour ne réinitialiser le temps qu'au changement réel de morceau
+  const lastTrackRef = useRef<{ round: number; url: string | null }>({
+    round: -1,
+    url: null,
+  });
 
   // Récupération sécurisée et persistante du volume (défaut 0.8)
   const [isMuted, setIsMuted] = useState<boolean>(() => {
@@ -96,36 +102,62 @@ export const SecureAudioPlayer: React.FC = () => {
     };
   }, [autoplayBlocked, phase, tryPlay]);
 
-  // Réaction STRICTEMENT au changement d'URL audio (nouvelle manche)
+  // Réaction au changement de morceau (nouvelle manche ou changement d'URL)
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    if (audioUrl) {
+    const isNewTrack =
+      audioUrl !== lastTrackRef.current.url ||
+      (roundNumber !== 0 && roundNumber !== lastTrackRef.current.round);
+
+    if (isNewTrack) {
+      lastTrackRef.current = { round: roundNumber, url: audioUrl };
       setAudioError(null);
       setAutoplayBlocked(false);
       setRetryCount(0);
-      audio.currentTime = 0;
 
-      if (phase === 'PLAYING') {
-        tryPlay();
+      if (audioUrl) {
+        audio.currentTime = 0;
+        if (phase === 'PLAYING') {
+          tryPlay();
+        }
+      } else {
+        audio.pause();
       }
-    } else {
-      audio.pause();
     }
-  }, [audioUrl, phase, tryPlay]);
+  }, [audioUrl, roundNumber, phase, tryPlay]);
 
-  // Réaction au changement de phase de jeu (Buzz, Vol de main, Révélation)
+  // Réaction au changement de phase de jeu (Pause lors d'un Buzz / Reprise sans repartir du début lors d'un vol de main)
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
     if (phase === 'PLAYING') {
+      // Si la manche est en cours et que l'audio reprend après un buzz raté :
+      // On NE remet SURTOUT PAS currentTime à 0 !
+      // On s'assure simplement que le flux audio est bien synchronisé avec le temps restant serveur
+      const totalDurationSec = 20;
+      const expectedTime = Math.max(
+        0,
+        (totalDurationSec * 1000 - (remainingAudioMs || totalDurationSec * 1000)) / 1000
+      );
+
+      // Si le lecteur audio était désynchronisé (ex: autoplay débloqué en retard ou décalage > 1.5s),
+      // recaler la lecture sur la bonne seconde
+      if (expectedTime > 0 && Math.abs(audio.currentTime - expectedTime) > 1.5) {
+        try {
+          audio.currentTime = expectedTime;
+        } catch {
+          // Ignorer si les métadonnées audio sont en cours de chargement
+        }
+      }
+
       tryPlay();
     } else {
       audio.pause();
     }
-  }, [phase, tryPlay]);
+  }, [phase, tryPlay, remainingAudioMs]);
 
   // Réaction au changement de volume ou mute : met à jour le volume directement sans recharger l'audio
   useEffect(() => {

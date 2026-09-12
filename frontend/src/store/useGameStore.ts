@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { playBuzzerSound } from '../utils/audioEffects';
 import type {
   AnswerWrongEvent,
   LeaderboardEntry,
@@ -223,6 +224,7 @@ export const useGameStore = create<GameState>((set) => ({
   },
 
   onPlayerBuzzed: (event) => {
+    playBuzzerSound();
     set({
       phase: 'BUZZED',
       buzzerPlayerId: event.buzzerPlayerId,

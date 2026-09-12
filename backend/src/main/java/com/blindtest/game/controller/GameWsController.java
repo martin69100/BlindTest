@@ -60,11 +60,16 @@ public class GameWsController {
 
     /**
      * Passage à la manche suivante après l'écran de révélation.
+     * Autorisé uniquement en solo : en multijoueur, le délai de transition est imposé à tous les joueurs.
      */
     @MessageMapping("/game/{gameId}/next-round")
     public void onNextRound(@DestinationVariable UUID gameId) {
         GameSession session = gameEngineService.getSession(gameId);
         if (session != null && session.getState() == GameSession.SessionState.ROUND_REVEAL) {
+            if (!session.isSolo()) {
+                log.info("Passage manuel de transition ignoré en multijoueur pour gameId={}", gameId);
+                return;
+            }
             session.cancelScheduledTask();
             if (session.hasMoreRounds()) {
                 session.nextRound();

@@ -26,13 +26,13 @@ export const RoundRevealCard: React.FC = () => {
   const [secondsRemaining, setSecondsRemaining] = useState(5);
 
   const handleNext = () => {
-    if (!gameId) return;
+    if (!gameId || !isSolo) return;
     wsService.sendNextRound(gameId);
   };
 
-  // Détection de la touche Espace pour passer immédiatement à la suite
+  // Détection de la touche Espace pour passer immédiatement à la suite (uniquement en solo)
   useEffect(() => {
-    if (phase !== 'REVEAL') return;
+    if (phase !== 'REVEAL' || !isSolo) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeTag = document.activeElement?.tagName?.toLowerCase();
@@ -46,7 +46,7 @@ export const RoundRevealCard: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [phase, gameId]);
+  }, [phase, gameId, isSolo]);
 
   // Compte à rebours automatique de 5 secondes pour enchaîner
   useEffect(() => {
@@ -57,7 +57,9 @@ export const RoundRevealCard: React.FC = () => {
       setSecondsRemaining((prev) => {
         if (prev <= 1) {
           clearInterval(interval);
-          handleNext();
+          if (isSolo) {
+            handleNext();
+          }
           return 0;
         }
         return prev - 1;
@@ -65,7 +67,7 @@ export const RoundRevealCard: React.FC = () => {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [phase, roundNumber]);
+  }, [phase, roundNumber, isSolo]);
 
   if (phase !== 'REVEAL' || !revealedTrack) return null;
 
@@ -288,29 +290,40 @@ export const RoundRevealCard: React.FC = () => {
           />
         </div>
 
-        {/* Bouton de passage avec indication du raccourci Espace */}
-        <button
-          onClick={handleNext}
-          className="w-full bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white py-3.5 px-6 rounded-2xl font-bold flex items-center justify-center space-x-2 shadow-lg shadow-brand-600/30 transition-transform active:scale-98 cursor-pointer group"
-        >
-          {isLastRound ? (
-            <>
-              <Trophy className="w-5 h-5 text-amber-300" />
-              <span>Voir les résultats finaux</span>
-              <kbd className="ml-2 text-[10px] font-mono uppercase bg-black/40 border border-white/20 px-2 py-0.5 rounded-lg text-white/90">
-                Espace
-              </kbd>
-            </>
-          ) : (
-            <>
-              <span>Passer à la suite ({secondsRemaining}s)</span>
-              <kbd className="ml-2 text-[10px] font-mono uppercase bg-black/40 border border-white/20 px-2 py-0.5 rounded-lg text-white/90 group-hover:bg-black/50">
-                Espace
-              </kbd>
-              <ArrowRight className="w-4 h-4 ml-1" />
-            </>
-          )}
-        </button>
+        {/* En solo : bouton de passage manuel avec raccourci Espace. En multijoueur : décompte automatique sans possibilité de passer */}
+        {isSolo ? (
+          <button
+            onClick={handleNext}
+            className="w-full bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white py-3.5 px-6 rounded-2xl font-bold flex items-center justify-center space-x-2 shadow-lg shadow-brand-600/30 transition-transform active:scale-98 cursor-pointer group"
+          >
+            {isLastRound ? (
+              <>
+                <Trophy className="w-5 h-5 text-amber-300" />
+                <span>Voir les résultats finaux</span>
+                <kbd className="ml-2 text-[10px] font-mono uppercase bg-black/40 border border-white/20 px-2 py-0.5 rounded-lg text-white/90">
+                  Espace
+                </kbd>
+              </>
+            ) : (
+              <>
+                <span>Passer à la suite ({secondsRemaining}s)</span>
+                <kbd className="ml-2 text-[10px] font-mono uppercase bg-black/40 border border-white/20 px-2 py-0.5 rounded-lg text-white/90 group-hover:bg-black/50">
+                  Espace
+                </kbd>
+                <ArrowRight className="w-4 h-4 ml-1" />
+              </>
+            )}
+          </button>
+        ) : (
+          <div className="w-full bg-dark-950/80 border border-slate-800 text-slate-300 py-3.5 px-6 rounded-2xl font-bold flex items-center justify-center space-x-2.5 shadow-lg select-none">
+            <Clock className="w-4 h-4 text-brand-400 animate-spin" style={{ animationDuration: '3s' }} />
+            <span className="text-sm font-semibold">
+              {isLastRound
+                ? `Résultats finaux dans ${secondsRemaining}s...`
+                : `Manche suivante dans ${secondsRemaining}s...`}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
