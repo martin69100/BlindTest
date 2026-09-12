@@ -203,7 +203,7 @@ export const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-dark-950 text-slate-100 flex flex-col">
-      <Navbar />
+      <Navbar onOpenProfile={() => setCurrentView('PROFILE')} />
 
       <main className="flex-1 flex flex-col justify-center">
         {isInGame ? (

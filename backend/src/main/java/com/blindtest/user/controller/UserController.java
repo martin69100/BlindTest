@@ -4,6 +4,7 @@ import com.blindtest.game.entity.Match;
 import com.blindtest.game.repository.MatchRepository;
 import com.blindtest.theme.entity.UserThemeStats;
 import com.blindtest.theme.repository.UserThemeStatsRepository;
+import com.blindtest.user.dto.LeaderboardUserDto;
 import com.blindtest.user.entity.User;
 import com.blindtest.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -44,10 +45,20 @@ public class UserController {
         List<Match> matches = matchRepository.findRecentMatchesByUserId(userId, PageRequest.of(0, limit));
         return ResponseEntity.ok(matches);
     }
-
     @GetMapping("/leaderboard")
-    public ResponseEntity<List<User>> getLeaderboard(@RequestParam(defaultValue = "20") int limit) {
-        List<User> top = userRepository.findTopPlayers(PageRequest.of(0, limit));
+    public ResponseEntity<List<LeaderboardUserDto>> getLeaderboard(@RequestParam(defaultValue = "50") int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 100));
+        List<LeaderboardUserDto> top = userRepository.findTopPlayers(PageRequest.of(0, safeLimit))
+                .stream()
+                .map(u -> LeaderboardUserDto.builder()
+                        .id(u.getId())
+                        .displayName(u.getDisplayName())
+                        .avatarUrl(u.getAvatarUrl())
+                        .elo(u.getElo())
+                        .createdAt(u.getCreatedAt())
+                        .lastActiveAt(u.getLastActiveAt())
+                        .build())
+                .toList();
         return ResponseEntity.ok(top);
     }
 }

@@ -79,8 +79,8 @@ export const userService = {
     const res = await api.get<UserThemeStats[]>(`/users/${userId}/stats`);
     return res.data;
   },
-  getLeaderboard: async (): Promise<User[]> => {
-    const res = await api.get<User[]>('/users/leaderboard');
+  getLeaderboard: async (limit: number = 50): Promise<User[]> => {
+    const res = await api.get<User[]>(`/users/leaderboard?limit=${limit}`);
     return res.data;
   },
 };
