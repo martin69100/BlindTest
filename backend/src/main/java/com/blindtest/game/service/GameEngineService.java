@@ -138,7 +138,7 @@ public class GameEngineService {
                                          Collection<com.blindtest.lobby.model.LobbyParticipant> participants,
                                          UUID themeId,
                                          int roundsCount) {
-        return createCustomMatch(lobbyCode, participants, themeId, roundsCount, "BUZZER", "INDIVIDUAL");
+        return createCustomMatch(lobbyCode, participants, themeId, roundsCount, "BUZZER", "INDIVIDUAL", null);
     }
 
     public GameSession createCustomMatch(String lobbyCode,
@@ -147,8 +147,25 @@ public class GameEngineService {
                                          int roundsCount,
                                          String gameMode,
                                          String teamMode) {
+        return createCustomMatch(lobbyCode, participants, themeId, roundsCount, gameMode, teamMode, null);
+    }
+
+    public GameSession createCustomMatch(String lobbyCode,
+                                         Collection<com.blindtest.lobby.model.LobbyParticipant> participants,
+                                         UUID themeId,
+                                         int roundsCount,
+                                         String gameMode,
+                                         String teamMode,
+                                         List<Track> customTracks) {
         int rounds = (roundsCount >= 3 && roundsCount <= 30) ? roundsCount : roundsPerMatch;
-        List<Track> tracks = selectTracksForGame(themeId, rounds);
+        List<Track> tracks;
+        if (customTracks != null && !customTracks.isEmpty()) {
+            List<Track> copy = new ArrayList<>(customTracks);
+            Collections.shuffle(copy);
+            tracks = copy.subList(0, Math.min(rounds, copy.size()));
+        } else {
+            tracks = selectTracksForGame(themeId, rounds);
+        }
 
         UUID gameId = UUID.randomUUID();
         List<com.blindtest.lobby.model.LobbyParticipant> partsList = new ArrayList<>(participants);

@@ -17,6 +17,10 @@ import {
   Shield,
   Clock,
   Zap,
+  Link,
+  Trash2,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react';
 import type { LobbyData, Theme, LobbyParticipant } from '../types';
 import { customLobbyService, themeService } from '../services/api';
@@ -37,6 +41,9 @@ export const CustomLobbyScreen: React.FC<CustomLobbyScreenProps> = ({ initialLob
   const [themes, setThemes] = useState<Theme[]>([]);
   const [copied, setCopied] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
+  const [playlistInput, setPlaylistInput] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
 
   const isHost = Boolean(user && lobby.hostId === user.id);
   const participantsList: LobbyParticipant[] = Array.isArray(lobby.participants)
@@ -92,8 +99,37 @@ export const CustomLobbyScreen: React.FC<CustomLobbyScreenProps> = ({ initialLob
     setTimeout(() => setCopied(false), 2500);
   };
 
+  const handleImportPlaylist = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!isHost || !user || !playlistInput.trim() || isImporting) return;
+    setIsImporting(true);
+    setImportError(null);
+    try {
+      const updated = await customLobbyService.setCustomPlaylist(lobby.code, user.id, playlistInput.trim());
+      setLobby(updated);
+      setPlaylistInput('');
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.message || 'Erreur lors de l’import de la playlist. Vérifiez que la playlist est publique.';
+      setImportError(msg);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleClearPlaylist = async () => {
+    if (!isHost || !user) return;
+    setImportError(null);
+    try {
+      const updated = await customLobbyService.clearCustomPlaylist(lobby.code, user.id);
+      setLobby(updated);
+    } catch (err: any) {
+      console.error('Erreur réinitialisation playlist :', err);
+    }
+  };
+
   const handleUpdateTheme = async (themeId: string | null, themeName: string) => {
     if (!isHost || !user) return;
+    setImportError(null);
     try {
       const updated = await customLobbyService.updateSettings(lobby.code, {
         requestingUserId: user.id,
@@ -277,7 +313,7 @@ export const CustomLobbyScreen: React.FC<CustomLobbyScreenProps> = ({ initialLob
                 type="button"
                 onClick={() => handleUpdateTheme(null, 'Tous thèmes')}
                 className={`p-2.5 rounded-xl border text-left transition-all flex items-center space-x-2 cursor-pointer ${
-                  lobby.themeId === null || !lobby.themeId
+                  !lobby.customPlaylistUrl && (lobby.themeId === null || !lobby.themeId)
                     ? 'bg-brand-600/20 border-brand-500 text-white shadow-md shadow-brand-500/10'
                     : 'bg-dark-800/60 border-slate-700/60 text-slate-400 hover:text-white hover:border-slate-600'
                 }`}
@@ -287,7 +323,7 @@ export const CustomLobbyScreen: React.FC<CustomLobbyScreenProps> = ({ initialLob
               </button>
 
               {themes.map((t) => {
-                const isSelected = lobby.themeId === t.id;
+                const isSelected = !lobby.customPlaylistUrl && lobby.themeId === t.id;
                 return (
                   <button
                     key={t.id}
@@ -304,6 +340,92 @@ export const CustomLobbyScreen: React.FC<CustomLobbyScreenProps> = ({ initialLob
                   </button>
                 );
               })}
+            </div>
+
+            {/* Import de playlist personnalisée (Spotify / Deezer) */}
+            <div className="pt-2 border-t border-slate-800/60">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-slate-300 flex items-center space-x-1.5">
+                  <Link className="w-3.5 h-3.5 text-brand-400" />
+                  <span>Playlist personnalisée (Spotify / Deezer) :</span>
+                </span>
+                <span className="text-[10px] text-slate-500">
+                  Lien public • Sans compte requis
+                </span>
+              </div>
+
+              {lobby.customPlaylistUrl ? (
+                <div className="bg-gradient-to-r from-brand-900/40 to-indigo-950/40 border border-brand-500/40 rounded-xl p-3 flex items-center justify-between shadow-lg shadow-brand-500/5">
+                  <div className="flex items-center space-x-3 min-w-0">
+                    <div className="w-9 h-9 rounded-xl bg-brand-500/20 border border-brand-500/40 flex items-center justify-center shrink-0">
+                      <Music className="w-5 h-5 text-brand-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-brand-500/20 text-brand-300 border border-brand-500/30">
+                          {lobby.customPlaylistProvider || 'Playlist'}
+                        </span>
+                        <h4 className="text-xs font-bold text-white truncate">
+                          {lobby.customPlaylistName || 'Playlist personnalisée'}
+                        </h4>
+                      </div>
+                      <p className="text-[11px] text-emerald-400 font-medium truncate mt-0.5">
+                        ✓ Active pour la partie — les manches seront tirées depuis cette playlist
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleClearPlaylist}
+                    className="p-2 rounded-lg bg-dark-800/80 hover:bg-rose-500/20 border border-slate-700/80 hover:border-rose-500/50 text-slate-400 hover:text-rose-300 transition-all cursor-pointer shrink-0 ml-3"
+                    title="Retirer la playlist personnalisée et revenir aux thèmes par défaut"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleImportPlaylist} className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type="url"
+                        value={playlistInput}
+                        onChange={(e) => {
+                          setPlaylistInput(e.target.value);
+                          if (importError) setImportError(null);
+                        }}
+                        placeholder="Ex: https://open.spotify.com/playlist/... ou https://www.deezer.com/playlist/..."
+                        className="w-full bg-dark-800/90 border border-slate-700/80 focus:border-brand-500 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-brand-500 transition-all"
+                        disabled={isImporting}
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={isImporting || !playlistInput.trim()}
+                      className="px-3.5 py-2 bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl transition-all shadow-md shadow-brand-500/20 flex items-center space-x-1.5 shrink-0 cursor-pointer"
+                    >
+                      {isImporting ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Import...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Charger</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {importError && (
+                    <div className="flex items-center space-x-1.5 text-xs text-rose-400 bg-rose-500/10 border border-rose-500/30 px-3 py-1.5 rounded-lg">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{importError}</span>
+                    </div>
+                  )}
+                </form>
+              )}
             </div>
 
             {/* Nombre de manches */}
@@ -398,9 +520,21 @@ export const CustomLobbyScreen: React.FC<CustomLobbyScreenProps> = ({ initialLob
           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400 bg-dark-950/40 p-3 rounded-xl border border-slate-800/50">
             <div className="flex items-center space-x-2">
               <span className="text-slate-500">Thème :</span>
-              <span className="font-bold text-white bg-dark-800 px-2.5 py-1 rounded-lg border border-slate-700">
-                {lobby.themeName || 'Tous thèmes'}
-              </span>
+              {lobby.customPlaylistUrl ? (
+                <span className="font-bold text-brand-300 bg-brand-500/10 border border-brand-500/30 px-2.5 py-1 rounded-lg flex items-center space-x-1.5">
+                  <Music className="w-3.5 h-3.5 text-brand-400" />
+                  <span>{lobby.customPlaylistName || lobby.themeName}</span>
+                  {lobby.customPlaylistProvider && (
+                    <span className="text-[10px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded bg-brand-500/20 text-brand-400 ml-1">
+                      {lobby.customPlaylistProvider}
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <span className="font-bold text-white bg-dark-800 px-2.5 py-1 rounded-lg border border-slate-700">
+                  {lobby.themeName || 'Tous thèmes'}
+                </span>
+              )}
             </div>
             <div className="flex items-center space-x-2">
               <span className="text-slate-500">Manches :</span>

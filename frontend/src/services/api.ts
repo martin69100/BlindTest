@@ -150,4 +150,15 @@ export const customLobbyService = {
     const res = await api.post<LobbyData>(`/lobby/${code}/return?userId=${userId}`);
     return res.data;
   },
+  setCustomPlaylist: async (code: string, userId: string, playlistUrl: string): Promise<LobbyData> => {
+    const res = await api.post<LobbyData>(`/lobby/${code}/custom-playlist?userId=${userId}`, {
+      playlistUrl,
+    });
+    return res.data;
+  },
+  clearCustomPlaylist: async (code: string, userId: string): Promise<LobbyData> => {
+    const res = await api.delete<LobbyData>(`/lobby/${code}/custom-playlist?userId=${userId}`);
+    return res.data;
+  },
 };
+

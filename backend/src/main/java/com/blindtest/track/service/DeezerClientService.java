@@ -109,7 +109,11 @@ public class DeezerClientService {
                     String freshUrl = item.getPreview();
                     previewCache.put(track.getDeezerId(), new CachedPreview(freshUrl, System.currentTimeMillis() + 10 * 60 * 1000L));
                     track.setPreviewUrl(freshUrl);
-                    trackRepository.save(track);
+                    if (track.getId() != null && track.getTheme() != null) {
+                        try {
+                            trackRepository.save(track);
+                        } catch (Exception ignored) {}
+                    }
                     log.info("Lien Deezer rafraîchi pour trackId={} (titre: '{}') : {}", track.getId(), track.getTitle(), freshUrl);
                     return freshUrl;
                 }
@@ -145,7 +149,11 @@ public class DeezerClientService {
                         previewCache.put(fallbackItem.getId(), new CachedPreview(freshUrl, System.currentTimeMillis() + 10 * 60 * 1000L));
                         track.setDeezerId(fallbackItem.getId());
                         track.setPreviewUrl(freshUrl);
-                        trackRepository.save(track);
+                        if (track.getId() != null && track.getTheme() != null) {
+                            try {
+                                trackRepository.save(track);
+                            } catch (Exception ignored) {}
+                        }
                         log.info("Lien Deezer de secours trouvé pour trackId={} (titre: '{}') : {}", track.getId(), track.getTitle(), freshUrl);
                         return freshUrl;
                     }

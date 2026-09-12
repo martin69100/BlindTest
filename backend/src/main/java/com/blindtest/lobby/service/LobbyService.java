@@ -26,6 +26,7 @@ public class LobbyService {
 
     private final SimpMessagingTemplate messagingTemplate;
     private final GameEngineService gameEngineService;
+    private final com.blindtest.track.service.PlaylistImportService playlistImportService;
 
     private final Map<String, Lobby> lobbies = new ConcurrentHashMap<>();
     private static final String CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -162,6 +163,12 @@ public class LobbyService {
         if (themeName != null) {
             lobby.setThemeId(themeId);
             lobby.setThemeName(themeName);
+            if (!themeName.startsWith("🎧")) {
+                lobby.setCustomPlaylistUrl(null);
+                lobby.setCustomPlaylistName(null);
+                lobby.setCustomPlaylistProvider(null);
+                lobby.getCustomPlaylistTracks().clear();
+            }
         }
         if (roundsCount != null && roundsCount >= 3 && roundsCount <= 30) {
             lobby.setRoundsCount(roundsCount);
@@ -174,6 +181,60 @@ public class LobbyService {
         }
 
         broadcastLobbyUpdate(lobby);
+        return lobby;
+    }
+
+    public Lobby setCustomPlaylist(String rawCode, UUID userId, String playlistUrl) {
+        String code = rawCode.trim().toUpperCase();
+        Lobby lobby = lobbies.get(code);
+        if (lobby == null) {
+            throw new IllegalArgumentException("Salon introuvable.");
+        }
+        if (!userId.equals(lobby.getHostId())) {
+            throw new IllegalStateException("Seul l'hôte peut configurer une playlist personnalisée.");
+        }
+
+        com.blindtest.track.service.PlaylistImportService.CustomPlaylistResult result =
+                playlistImportService.importPlaylist(playlistUrl);
+
+        if (result.tracks().isEmpty()) {
+            throw new IllegalArgumentException("Aucun morceau avec extrait 30s disponible dans cette playlist.");
+        }
+
+        lobby.setCustomPlaylistUrl(playlistUrl);
+        lobby.setCustomPlaylistName(result.title());
+        lobby.setCustomPlaylistProvider(result.provider());
+        lobby.setCustomPlaylistTracks(new ArrayList<>(result.tracks()));
+        lobby.setThemeId(null);
+        lobby.setThemeName("🎧 " + result.title());
+        lobby.setLastActivityAt(Instant.now());
+
+        broadcastLobbyUpdate(lobby);
+        log.info("Playlist personnalisée ({}) configurée pour le salon {} : '{}' ({} morceaux disponibles).",
+                result.provider(), code, result.title(), result.tracks().size());
+        return lobby;
+    }
+
+    public Lobby clearCustomPlaylist(String rawCode, UUID userId) {
+        String code = rawCode.trim().toUpperCase();
+        Lobby lobby = lobbies.get(code);
+        if (lobby == null) {
+            throw new IllegalArgumentException("Salon introuvable.");
+        }
+        if (!userId.equals(lobby.getHostId())) {
+            throw new IllegalStateException("Seul l'hôte peut réinitialiser la playlist.");
+        }
+
+        lobby.setCustomPlaylistUrl(null);
+        lobby.setCustomPlaylistName(null);
+        lobby.setCustomPlaylistProvider(null);
+        lobby.getCustomPlaylistTracks().clear();
+        lobby.setThemeId(null);
+        lobby.setThemeName("Tous thèmes");
+        lobby.setLastActivityAt(Instant.now());
+
+        broadcastLobbyUpdate(lobby);
+        log.info("Playlist personnalisée réinitialisée pour le salon {}.", code);
         return lobby;
     }
 
@@ -217,7 +278,8 @@ public class LobbyService {
                 lobby.getThemeId(),
                 lobby.getRoundsCount(),
                 lobby.getGameMode(),
-                lobby.getTeamMode()
+                lobby.getTeamMode(),
+                lobby.getCustomPlaylistTracks()
         );
 
         lobby.setActiveGameId(session.getGameId());
@@ -231,6 +293,7 @@ public class LobbyService {
                 "roundsCount", lobby.getRoundsCount(),
                 "gameMode", lobby.getGameMode() != null ? lobby.getGameMode() : "BUZZER",
                 "teamMode", lobby.getTeamMode() != null ? lobby.getTeamMode() : "INDIVIDUAL",
+                "customPlaylistName", lobby.getCustomPlaylistName() != null ? lobby.getCustomPlaylistName() : "",
                 "participantsCount", lobby.getParticipants().size()
         );
 

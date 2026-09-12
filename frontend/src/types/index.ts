@@ -63,6 +63,9 @@ export interface LobbyData {
   hostName: string;
   themeId?: string;
   themeName?: string;
+  customPlaylistUrl?: string;
+  customPlaylistName?: string;
+  customPlaylistProvider?: string;
   roundsCount: number;
   gameMode?: 'BUZZER' | 'NO_BUZZER';
   teamMode?: 'INDIVIDUAL' | 'TEAMS';

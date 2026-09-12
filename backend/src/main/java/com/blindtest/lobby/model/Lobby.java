@@ -1,5 +1,7 @@
 package com.blindtest.lobby.model;
 
+import com.blindtest.track.entity.Track;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -26,6 +28,14 @@ public class Lobby {
     private String hostName;
     private UUID themeId;
     private String themeName;
+
+    private String customPlaylistUrl;
+    private String customPlaylistName;
+    private String customPlaylistProvider;
+
+    @JsonIgnore
+    @Builder.Default
+    private List<Track> customPlaylistTracks = new ArrayList<>();
 
     @Builder.Default
     private int roundsCount = 10;

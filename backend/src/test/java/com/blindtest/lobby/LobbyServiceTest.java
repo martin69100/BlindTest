@@ -5,6 +5,7 @@ import com.blindtest.game.service.GameEngineService;
 import com.blindtest.lobby.model.CustomGameFinishedEvent;
 import com.blindtest.lobby.model.Lobby;
 import com.blindtest.lobby.service.LobbyService;
+import com.blindtest.track.service.PlaylistImportService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -28,6 +29,9 @@ class LobbyServiceTest {
 
     @Mock
     private GameEngineService gameEngineService;
+
+    @Mock
+    private PlaylistImportService playlistImportService;
 
     @InjectMocks
     private LobbyService lobbyService;
@@ -93,12 +97,43 @@ class LobbyServiceTest {
         GameSession mockSession = mock(GameSession.class);
         when(mockSession.getGameId()).thenReturn(mockGameId);
 
-        when(gameEngineService.createCustomMatch(eq(code), anyCollection(), any(), anyInt(), any(), any()))
+        when(gameEngineService.createCustomMatch(eq(code), anyCollection(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(mockSession);
 
         Lobby startedLobby = lobbyService.startGame(code, hostId);
         assertEquals(Lobby.LobbyStatus.PLAYING, startedLobby.getStatus());
         assertEquals(mockGameId, startedLobby.getActiveGameId());
+    }
+
+    @Test
+    @DisplayName("Configuration et réinitialisation d'une playlist personnalisée")
+    void testCustomPlaylistConfigAndClear() {
+        Lobby lobby = lobbyService.createLobby(
+                hostId, "Alice", null, 1200, null, "Rock", 10
+        );
+        String code = lobby.getCode();
+
+        com.blindtest.track.entity.Track dummyTrack = com.blindtest.track.entity.Track.builder()
+                .title("Song 1")
+                .artist("Artist 1")
+                .previewUrl("https://example.com/audio.mp3")
+                .build();
+
+        PlaylistImportService.CustomPlaylistResult mockResult =
+                new PlaylistImportService.CustomPlaylistResult("My Awesome Playlist", List.of(dummyTrack), "Deezer");
+
+        when(playlistImportService.importPlaylist("https://deezer.com/playlist/12345")).thenReturn(mockResult);
+
+        Lobby configured = lobbyService.setCustomPlaylist(code, hostId, "https://deezer.com/playlist/12345");
+        assertEquals("My Awesome Playlist", configured.getCustomPlaylistName());
+        assertEquals("Deezer", configured.getCustomPlaylistProvider());
+        assertEquals(1, configured.getCustomPlaylistTracks().size());
+        assertEquals("🎧 My Awesome Playlist", configured.getThemeName());
+
+        Lobby cleared = lobbyService.clearCustomPlaylist(code, hostId);
+        assertNull(cleared.getCustomPlaylistUrl());
+        assertNull(cleared.getCustomPlaylistName());
+        assertTrue(cleared.getCustomPlaylistTracks().isEmpty());
     }
 
     @Test

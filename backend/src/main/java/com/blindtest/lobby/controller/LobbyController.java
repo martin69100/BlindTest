@@ -98,4 +98,20 @@ public class LobbyController {
         Lobby lobby = lobbyService.returnToLobby(code, userId);
         return ResponseEntity.ok(lobby);
     }
+
+    @PostMapping("/{code}/custom-playlist")
+    public ResponseEntity<Lobby> setCustomPlaylist(@PathVariable String code,
+                                                   @RequestParam UUID userId,
+                                                   @RequestBody Map<String, String> body) {
+        String playlistUrl = body != null ? body.get("playlistUrl") : null;
+        Lobby lobby = lobbyService.setCustomPlaylist(code, userId, playlistUrl);
+        return ResponseEntity.ok(lobby);
+    }
+
+    @DeleteMapping("/{code}/custom-playlist")
+    public ResponseEntity<Lobby> clearCustomPlaylist(@PathVariable String code,
+                                                     @RequestParam UUID userId) {
+        Lobby lobby = lobbyService.clearCustomPlaylist(code, userId);
+        return ResponseEntity.ok(lobby);
+    }
 }
