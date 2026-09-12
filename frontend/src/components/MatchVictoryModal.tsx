@@ -34,6 +34,9 @@ export const MatchVictoryModal: React.FC = () => {
     resetGame,
     isSolo,
     isCustom,
+    teamMode,
+    teamScores,
+    playerTeams,
     lobbyCode,
     activeLobby,
     leaderboard,
@@ -77,20 +80,29 @@ export const MatchVictoryModal: React.FC = () => {
     : (isPlayer2 ? player1Name : player2Name) || 'Adversaire';
 
   const isForfeit = matchResult?.forfeit === true;
+  const isTeamMode = isCustom && teamMode === 'TEAMS';
+  const blueScore = teamScores['BLUE'] ?? 0;
+  const redScore = teamScores['RED'] ?? 0;
+  const myTeam = user ? (playerTeams[user.id] || 'BLUE') : 'BLUE';
+  const teamWinner = blueScore > redScore ? 'BLUE' : redScore > blueScore ? 'RED' : 'DRAW';
+  const isTeamDraw = teamWinner === 'DRAW';
+  const isMyTeamWinner = !isTeamDraw && teamWinner === myTeam;
 
   // En mode personnalisé multijoueur
   const userRankIndex = isCustom && user && leaderboard?.length > 0
     ? leaderboard.findIndex((e) => e.playerId === user.id)
     : -1;
   const userRank = userRankIndex !== -1 ? userRankIndex + 1 : 1;
-  const isWinner = isCustom
+  const isWinner = isTeamMode
+    ? isMyTeamWinner
+    : isCustom
     ? userRank === 1
     : matchResult && (
         (matchResult.winnerId === user?.id) ||
         (Boolean(user) && myScore > opponentScore)
       );
   const isPodium = isCustom && userRank <= 3;
-  const isDraw = !isCustom && myScore === opponentScore;
+  const isDraw = isTeamMode ? isTeamDraw : !isCustom && myScore === opponentScore;
 
   const eloDelta = isPlayer2
     ? (matchResult?.player2EloChange ?? 0)
@@ -199,6 +211,12 @@ export const MatchVictoryModal: React.FC = () => {
               ? isForfeit
                 ? 'Entraînement interrompu'
                 : 'Session d’entraînement terminée !'
+              : isTeamMode
+              ? isTeamDraw
+                ? 'ÉGALITÉ ENTRE LES ÉQUIPES !'
+                : isMyTeamWinner
+                ? 'VICTOIRE DE VOTRE ÉQUIPE !'
+                : 'VICTOIRE DE L’ÉQUIPE ADVERSE'
               : isCustom
               ? isWinner
                 ? 'VICTOIRE !'
@@ -220,13 +238,62 @@ export const MatchVictoryModal: React.FC = () => {
             </div>
           )}
 
+          {/* Bannière d'équipe si Team Mode */}
+          {isTeamMode && (
+            <div className="w-full bg-dark-950/80 border border-slate-800 rounded-2xl p-3 my-2 flex items-center justify-around">
+              {/* Bleus */}
+              <div
+                className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl border ${
+                  teamWinner === 'BLUE'
+                    ? 'bg-blue-600/25 border-blue-500 shadow-md shadow-blue-500/20'
+                    : 'bg-dark-900 border-slate-800 opacity-80'
+                }`}
+              >
+                <span className="text-xl">🔵</span>
+                <div className="text-left">
+                  <div className="flex items-center space-x-1">
+                    <span className="text-xs font-black text-blue-400 uppercase">Bleus</span>
+                    {teamWinner === 'BLUE' && <span className="text-[10px]">👑</span>}
+                    {myTeam === 'BLUE' && (
+                      <span className="text-[9px] bg-blue-500/30 text-blue-200 px-1 rounded font-extrabold">Moi</span>
+                    )}
+                  </div>
+                  <span className="text-lg font-mono font-black text-white">{blueScore} pts</span>
+                </div>
+              </div>
+
+              <span className="text-xs font-bold text-slate-500 uppercase px-1">VS</span>
+
+              {/* Rouges */}
+              <div
+                className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl border ${
+                  teamWinner === 'RED'
+                    ? 'bg-rose-600/25 border-rose-500 shadow-md shadow-rose-500/20'
+                    : 'bg-dark-900 border-slate-800 opacity-80'
+                }`}
+              >
+                <span className="text-xl">🔴</span>
+                <div className="text-left">
+                  <div className="flex items-center space-x-1">
+                    <span className="text-xs font-black text-rose-400 uppercase">Rouges</span>
+                    {teamWinner === 'RED' && <span className="text-[10px]">👑</span>}
+                    {myTeam === 'RED' && (
+                      <span className="text-[9px] bg-rose-500/30 text-rose-200 px-1 rounded font-extrabold">Moi</span>
+                    )}
+                  </div>
+                  <span className="text-lg font-mono font-black text-white">{redScore} pts</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Classement Multijoueur Complet si Custom */}
           {isCustom && leaderboard && leaderboard.length > 0 ? (
             <div className="bg-dark-950/70 border border-slate-800 rounded-2xl p-3 my-2.5">
               <div className="flex items-center justify-between mb-2 px-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center space-x-1">
                   <Trophy className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Classement Final ({leaderboard.length} joueurs)</span>
+                  <span>Classement Individuel ({leaderboard.length} joueurs)</span>
                 </span>
                 <span className="text-[10px] text-slate-500 font-mono">Scores &bull; Rangs ELO</span>
               </div>
@@ -234,6 +301,7 @@ export const MatchVictoryModal: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 {leaderboard.map((player, idx) => {
                   const isMe = user && player.playerId === user.id;
+                  const pTeam = playerTeams[player.playerId];
                   return (
                     <div
                       key={player.playerId}
@@ -248,9 +316,14 @@ export const MatchVictoryModal: React.FC = () => {
                           {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : idx + 1}
                         </span>
                         <div className="min-w-0">
-                          <p className={`text-xs font-black truncate max-w-[110px] ${isMe ? 'text-white' : 'text-slate-300'}`}>
-                            {player.playerName} {isMe && '(Vous)'}
-                          </p>
+                          <div className="flex items-center space-x-1">
+                            {isTeamMode && (
+                              <span className="text-[10px]">{pTeam === 'RED' ? '🔴' : '🔵'}</span>
+                            )}
+                            <p className={`text-xs font-black truncate max-w-[110px] ${isMe ? 'text-white' : 'text-slate-300'}`}>
+                              {player.playerName} {isMe && '(Vous)'}
+                            </p>
+                          </div>
                           <p className="text-[10px] font-mono text-amber-400/80">
                             {player.elo || 1000} ELO
                           </p>

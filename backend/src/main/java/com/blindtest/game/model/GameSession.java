@@ -39,6 +39,18 @@ public class GameSession {
     private String lobbyCode;
 
     @Builder.Default
+    private String gameMode = "BUZZER"; // "BUZZER" ou "NO_BUZZER"
+
+    @Builder.Default
+    private String teamMode = "INDIVIDUAL"; // "INDIVIDUAL" ou "TEAMS"
+
+    @Builder.Default
+    private Map<UUID, String> playerTeams = new ConcurrentHashMap<>();
+
+    @Builder.Default
+    private Map<String, Integer> teamScores = new ConcurrentHashMap<>();
+
+    @Builder.Default
     private List<UUID> playerIds = new CopyOnWriteArrayList<>();
 
     @Builder.Default
@@ -118,6 +130,7 @@ public class GameSession {
         private int player1Score;
         private int player2Score;
         private Map<String, Integer> playerScores;
+        private Map<String, Integer> teamScores;
         private List<WrongGuessEntry> wrongGuesses;
     }
 
@@ -131,6 +144,13 @@ public class GameSession {
     // Option A : Vol de main
     @Builder.Default
     private Set<UUID> playersBuzzedInRound = ConcurrentHashMap.newKeySet();
+
+    // Mode NO_BUZZER : titres et artistes trouvés par joueur pour la manche courante
+    @Builder.Default
+    private Set<UUID> roundFoundTitles = ConcurrentHashMap.newKeySet();
+
+    @Builder.Default
+    private Set<UUID> roundFoundArtists = ConcurrentHashMap.newKeySet();
 
     // Verrou atomique pour concurrence sur le buzzer
     @Builder.Default
@@ -184,6 +204,8 @@ public class GameSession {
         this.firstFoundType = GuessType.NONE;
         this.currentBuzzerPlayerId = null;
         this.playersBuzzedInRound.clear();
+        this.roundFoundTitles.clear();
+        this.roundFoundArtists.clear();
         this.wrongGuessesInRound.clear();
         this.buzzLock.set(false);
     }
@@ -195,6 +217,10 @@ public class GameSession {
             player1Score += points;
         } else if (playerId.equals(player2Id)) {
             player2Score += points;
+        }
+        if ("TEAMS".equalsIgnoreCase(teamMode)) {
+            String team = playerTeams.getOrDefault(playerId, "BLUE");
+            teamScores.merge(team, points, Integer::sum);
         }
     }
 

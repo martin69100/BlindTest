@@ -21,6 +21,8 @@ export const App: React.FC = () => {
     onRoundStart,
     onPlayerBuzzed,
     onFirstAnswerCorrect,
+    onFreeAnswerCorrect,
+    onFreeAnswerWrong,
     onStealOpen,
     onAnswerWrong,
     onRoundEnd,
@@ -127,6 +129,12 @@ export const App: React.FC = () => {
         case 'FIRST_ANSWER_CORRECT':
           onFirstAnswerCorrect(payload);
           break;
+        case 'FREE_ANSWER_CORRECT':
+          onFreeAnswerCorrect(payload, user?.id);
+          break;
+        case 'FREE_ANSWER_WRONG':
+          onFreeAnswerWrong(payload);
+          break;
         case 'ANSWER_FAILED_STEAL_OPEN':
           onStealOpen(payload);
           break;
@@ -148,7 +156,7 @@ export const App: React.FC = () => {
     return () => {
       if (sub) sub.unsubscribe();
     };
-  }, [gameId, phase, user, onRoundStart, onPlayerBuzzed, onFirstAnswerCorrect, onStealOpen, onAnswerWrong, onRoundEnd, onMatchFinished]);
+  }, [gameId, phase, user, onRoundStart, onPlayerBuzzed, onFirstAnswerCorrect, onFreeAnswerCorrect, onFreeAnswerWrong, onStealOpen, onAnswerWrong, onRoundEnd, onMatchFinished]);
 
   // Écoute globale des événements de salon sur /topic/lobby/{currentLobbyCode}
   const currentLobbyCode = activeLobby?.code || lobbyCode;
@@ -159,7 +167,13 @@ export const App: React.FC = () => {
       if (payload.event === 'LOBBY_UPDATED' && payload.lobby) {
         setActiveLobby(payload.lobby);
       } else if (payload.event === 'LOBBY_GAME_START') {
-        initCustomGame(payload.gameId, payload.lobbyCode, payload.roundsCount || 10);
+        initCustomGame(
+          payload.gameId,
+          payload.lobbyCode,
+          payload.roundsCount || 10,
+          payload.gameMode || 'BUZZER',
+          payload.teamMode || 'INDIVIDUAL'
+        );
       } else if (payload.event === 'LOBBY_RETURN') {
         returnToCustomLobby();
         customLobbyService.getLobby(currentLobbyCode).then((fresh) => {

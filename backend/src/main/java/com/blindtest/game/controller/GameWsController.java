@@ -47,7 +47,12 @@ public class GameWsController {
      */
     @MessageMapping("/game/{gameId}/answer")
     public void onPlayerAnswer(@DestinationVariable UUID gameId, @Payload GameActionDto dto) {
-        gameEngineService.handleAnswer(gameId, dto.getPlayerId(), dto.getGuess());
+        GameSession session = gameEngineService.getSession(gameId);
+        if (session != null && "NO_BUZZER".equalsIgnoreCase(session.getGameMode())) {
+            gameEngineService.handleFreeAnswer(gameId, dto.getPlayerId(), dto.getGuess());
+        } else {
+            gameEngineService.handleAnswer(gameId, dto.getPlayerId(), dto.getGuess());
+        }
     }
 
     /**

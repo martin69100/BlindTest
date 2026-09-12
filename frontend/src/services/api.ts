@@ -131,9 +131,15 @@ export const customLobbyService = {
       themeId?: string;
       themeName?: string;
       roundsCount?: number;
+      gameMode?: 'BUZZER' | 'NO_BUZZER';
+      teamMode?: 'INDIVIDUAL' | 'TEAMS';
     }
   ): Promise<LobbyData> => {
     const res = await api.post<LobbyData>(`/lobby/${code}/settings`, data);
+    return res.data;
+  },
+  switchTeam: async (code: string, userId: string, team: 'BLUE' | 'RED'): Promise<LobbyData> => {
+    const res = await api.post<LobbyData>(`/lobby/${code}/team?userId=${userId}&team=${team}`);
     return res.data;
   },
   startGame: async (code: string, userId: string): Promise<LobbyData> => {

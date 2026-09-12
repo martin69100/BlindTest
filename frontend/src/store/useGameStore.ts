@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { playBuzzerSound } from '../utils/audioEffects';
 import type {
   AnswerWrongEvent,
+  FreeAnswerCorrectEvent,
+  FreeAnswerWrongEvent,
   LeaderboardEntry,
   LobbyData,
   MatchFinishedEvent,
@@ -16,12 +18,29 @@ import type {
 
 export type GamePhase = 'LOBBY' | 'WAITING' | 'PLAYING' | 'BUZZED' | 'BONUS' | 'REVEAL' | 'FINISHED';
 
+export interface FreeFeedItem {
+  id: string;
+  playerId: string;
+  playerName: string;
+  foundType: 'TITLE' | 'ARTIST';
+  foundName: string;
+  playerTeam?: string;
+  timestamp: number;
+}
+
 interface GameState {
   gameId: string | null;
   isSolo: boolean;
   isCustom: boolean;
   lobbyCode: string | null;
   activeLobby: LobbyData | null;
+  gameMode: 'BUZZER' | 'NO_BUZZER';
+  teamMode: 'INDIVIDUAL' | 'TEAMS';
+  teamScores: Record<string, number>;
+  playerTeams: Record<string, string>;
+  myFoundTitle: boolean;
+  myFoundArtist: boolean;
+  freeFeedEvents: FreeFeedItem[];
   phase: GamePhase;
   roundNumber: number;
   totalRounds: number;
@@ -76,13 +95,17 @@ interface GameState {
   initCustomGame: (
     gameId: string,
     lobbyCode: string,
-    totalRounds?: number
+    totalRounds?: number,
+    gameMode?: 'BUZZER' | 'NO_BUZZER',
+    teamMode?: 'INDIVIDUAL' | 'TEAMS'
   ) => void;
   setActiveLobby: (lobby: LobbyData | null) => void;
   returnToCustomLobby: () => void;
   onRoundStart: (event: RoundStartEvent) => void;
   onPlayerBuzzed: (event: PlayerBuzzedEvent) => void;
   onFirstAnswerCorrect: (event: any) => void;
+  onFreeAnswerCorrect: (event: FreeAnswerCorrectEvent, currentUserId?: string) => void;
+  onFreeAnswerWrong: (event: FreeAnswerWrongEvent) => void;
   onStealOpen: (event: StealOpenEvent) => void;
   onAnswerWrong: (event: AnswerWrongEvent) => void;
   onRoundEnd: (event: RoundEndEvent) => void;
@@ -96,6 +119,13 @@ export const useGameStore = create<GameState>((set) => ({
   isCustom: false,
   lobbyCode: null,
   activeLobby: null,
+  gameMode: 'BUZZER',
+  teamMode: 'INDIVIDUAL',
+  teamScores: {},
+  playerTeams: {},
+  myFoundTitle: false,
+  myFoundArtist: false,
+  freeFeedEvents: [],
   phase: 'LOBBY',
   roundNumber: 0,
   totalRounds: 10,
@@ -129,12 +159,19 @@ export const useGameStore = create<GameState>((set) => ({
 
   setActiveLobby: (lobby) => set({ activeLobby: lobby }),
 
-  initCustomGame: (gameId, lobbyCode, totalRounds = 10) => {
+  initCustomGame: (gameId, lobbyCode, totalRounds = 10, gameMode = 'BUZZER', teamMode = 'INDIVIDUAL') => {
     set({
       gameId,
       isSolo: false,
       isCustom: true,
       lobbyCode,
+      gameMode,
+      teamMode,
+      teamScores: { BLUE: 0, RED: 0 },
+      playerTeams: {},
+      myFoundTitle: false,
+      myFoundArtist: false,
+      freeFeedEvents: [],
       phase: 'WAITING',
       roundNumber: 0,
       totalRounds,
@@ -161,6 +198,9 @@ export const useGameStore = create<GameState>((set) => ({
       buzzerName: null,
       firstFoundType: null,
       firstFoundName: null,
+      myFoundTitle: false,
+      myFoundArtist: false,
+      freeFeedEvents: [],
       revealedTrack: null,
       lastRoundResult: null,
       matchResult: null,
@@ -176,6 +216,13 @@ export const useGameStore = create<GameState>((set) => ({
       isSolo,
       isCustom: false,
       lobbyCode: null,
+      gameMode: 'BUZZER',
+      teamMode: 'INDIVIDUAL',
+      teamScores: {},
+      playerTeams: {},
+      myFoundTitle: false,
+      myFoundArtist: false,
+      freeFeedEvents: [],
       phase: 'WAITING',
       roundNumber: 0,
       player1Score: 0,
@@ -207,6 +254,9 @@ export const useGameStore = create<GameState>((set) => ({
       buzzerName: null,
       firstFoundType: null,
       firstFoundName: null,
+      myFoundTitle: false,
+      myFoundArtist: false,
+      freeFeedEvents: [],
       revealedTrack: null,
       lastRoundResult: null,
       failedPlayerIds: [],
@@ -214,6 +264,10 @@ export const useGameStore = create<GameState>((set) => ({
       roundWrongGuesses: [],
       isCustom: event.isCustom ?? state.isCustom,
       lobbyCode: event.lobbyCode ?? state.lobbyCode,
+      gameMode: (event.gameMode as any) ?? state.gameMode,
+      teamMode: (event.teamMode as any) ?? state.teamMode,
+      teamScores: event.teamScores ?? state.teamScores,
+      playerTeams: event.playerTeams ?? state.playerTeams,
       playerScores: event.playerScores ?? state.playerScores,
       leaderboard: event.leaderboard ?? state.leaderboard,
       player1Id: event.player1Id || state.player1Id,
@@ -243,7 +297,43 @@ export const useGameStore = create<GameState>((set) => ({
       player1Score: event.currentScores?.player1 ?? state.player1Score,
       player2Score: event.currentScores?.player2 ?? state.player2Score,
       playerScores: event.playerScores ?? state.playerScores,
+      teamScores: event.teamScores ?? state.teamScores,
       leaderboard: event.leaderboard ?? state.leaderboard,
+    }));
+  },
+
+  onFreeAnswerCorrect: (event, currentUserId) => {
+    set((state) => {
+      const isMe = currentUserId && String(event.playerId) === String(currentUserId);
+      const newFeedItem: FreeFeedItem = {
+        id: `${Date.now()}-${Math.random()}`,
+        playerId: event.playerId,
+        playerName: event.playerName,
+        foundType: event.foundType,
+        foundName: event.foundName,
+        playerTeam: event.playerTeam,
+        timestamp: Date.now(),
+      };
+      return {
+        myFoundTitle: isMe && event.foundType === 'TITLE' ? true : state.myFoundTitle,
+        myFoundArtist: isMe && event.foundType === 'ARTIST' ? true : state.myFoundArtist,
+        freeFeedEvents: [newFeedItem, ...state.freeFeedEvents].slice(0, 20),
+        playerScores: event.playerScores ?? state.playerScores,
+        teamScores: event.teamScores ?? state.teamScores,
+        leaderboard: event.leaderboard ?? state.leaderboard,
+      };
+    });
+  },
+
+  onFreeAnswerWrong: (event) => {
+    const wrongEntry: WrongGuess = {
+      playerId: event.playerId,
+      playerName: event.playerName || 'Joueur',
+      guess: event.guess,
+    };
+    set((state) => ({
+      lastWrongGuess: wrongEntry,
+      roundWrongGuesses: [...state.roundWrongGuesses, wrongEntry],
     }));
   },
 
@@ -296,6 +386,7 @@ export const useGameStore = create<GameState>((set) => ({
             }
           : {}),
         ...(event.playerScores ? { playerScores: event.playerScores } : {}),
+        ...(event.teamScores ? { teamScores: event.teamScores } : {}),
         ...(event.leaderboard ? { leaderboard: event.leaderboard } : {}),
         ...(event.firstFoundType ? { firstFoundType: event.firstFoundType } : {}),
       };
@@ -325,6 +416,7 @@ export const useGameStore = create<GameState>((set) => ({
         player1Score: event.scores.player1,
         player2Score: event.scores.player2,
         playerScores: event.playerScores,
+        teamScores: event.teamScores ?? state.teamScores,
         wrongGuesses,
       };
 
@@ -336,6 +428,8 @@ export const useGameStore = create<GameState>((set) => ({
         player1Score: event.scores.player1,
         player2Score: event.scores.player2,
         playerScores: event.playerScores ?? state.playerScores,
+        teamScores: event.teamScores ?? state.teamScores,
+        playerTeams: event.playerTeams ?? state.playerTeams,
         leaderboard: event.leaderboard ?? state.leaderboard,
         isCustom: event.isCustom ?? state.isCustom,
         lobbyCode: event.lobbyCode ?? state.lobbyCode,
@@ -371,6 +465,8 @@ export const useGameStore = create<GameState>((set) => ({
         isCustom: event.isCustom ?? state.isCustom,
         lobbyCode: event.lobbyCode ?? state.lobbyCode,
         playerScores: event.playerScores ?? event.scores ?? state.playerScores,
+        teamScores: event.teamScores ?? state.teamScores,
+        playerTeams: event.playerTeams ?? state.playerTeams,
         leaderboard: event.leaderboard ?? state.leaderboard,
         roundHistory: (event.roundHistory && event.roundHistory.length > 0) ? event.roundHistory : state.roundHistory,
         player1Id: event.player1Id || state.player1Id,
@@ -387,6 +483,13 @@ export const useGameStore = create<GameState>((set) => ({
       isCustom: false,
       lobbyCode: null,
       activeLobby: null,
+      gameMode: 'BUZZER',
+      teamMode: 'INDIVIDUAL',
+      teamScores: {},
+      playerTeams: {},
+      myFoundTitle: false,
+      myFoundArtist: false,
+      freeFeedEvents: [],
       phase: 'LOBBY',
       roundNumber: 0,
       audioUrl: null,

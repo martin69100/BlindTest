@@ -9,4 +9,6 @@ public class UpdateLobbySettingsRequest {
     private UUID themeId;
     private String themeName;
     private Integer roundsCount;
+    private String gameMode;
+    private String teamMode;
 }

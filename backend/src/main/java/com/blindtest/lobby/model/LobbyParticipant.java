@@ -20,4 +20,6 @@ public class LobbyParticipant {
     private boolean isReady;
     private int lastGameScore;
     private int lastGameRank;
+    @Builder.Default
+    private String team = "BLUE"; // "BLUE" ou "RED"
 }

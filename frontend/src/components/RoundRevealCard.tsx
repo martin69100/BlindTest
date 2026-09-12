@@ -15,6 +15,9 @@ export const RoundRevealCard: React.FC = () => {
     isLastRound,
     isSolo,
     isCustom,
+    teamMode,
+    teamScores,
+    playerTeams,
     leaderboard,
     player1Id,
     player2Id,
@@ -254,30 +257,53 @@ export const RoundRevealCard: React.FC = () => {
           </div>
         )}
 
+        {/* Scores d'équipe si teamMode */}
+        {isCustom && teamMode === 'TEAMS' && (
+          <div className="w-full bg-dark-950/80 border border-slate-800 rounded-2xl p-2.5 mb-3 flex items-center justify-around text-xs">
+            <div className="flex items-center space-x-1.5">
+              <span>🔵</span>
+              <span className="font-bold text-blue-400">Bleus :</span>
+              <span className="font-mono font-black text-white">{teamScores['BLUE'] ?? 0} pts</span>
+            </div>
+            <span className="text-slate-600 font-bold">|</span>
+            <div className="flex items-center space-x-1.5">
+              <span>🔴</span>
+              <span className="font-bold text-rose-400">Rouges :</span>
+              <span className="font-mono font-black text-white">{teamScores['RED'] ?? 0} pts</span>
+            </div>
+          </div>
+        )}
+
         {/* Mini-classement multijoueur si custom */}
         {isCustom && leaderboard && leaderboard.length > 0 && (
           <div className="w-full bg-dark-950/60 border border-slate-800 rounded-2xl p-2.5 mb-4">
             <div className="flex items-center justify-between mb-1.5 px-1">
               <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 flex items-center space-x-1">
                 <Users className="w-3 h-3" />
-                <span>Scores actuels</span>
+                <span>Scores individuels</span>
               </span>
             </div>
             <div className="flex flex-wrap gap-2">
-              {leaderboard.map((p, idx) => (
-                <div
-                  key={p.playerId}
-                  className={`text-[11px] px-2.5 py-1 rounded-lg border flex items-center space-x-1.5 ${
-                    user && p.playerId === user.id
-                      ? 'bg-brand-500/20 border-brand-500/50 text-white font-bold'
-                      : 'bg-dark-900 border-slate-800 text-slate-300'
-                  }`}
-                >
-                  <span>{idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}</span>
-                  <span className="truncate max-w-[80px]">{p.playerName}</span>
-                  <span className="font-mono font-black text-brand-400">{p.score} pts</span>
-                </div>
-              ))}
+              {leaderboard.map((p, idx) => {
+                const pTeam = playerTeams[p.playerId];
+                return (
+                  <div
+                    key={p.playerId}
+                    className={`text-[11px] px-2.5 py-1 rounded-lg border flex items-center space-x-1.5 ${
+                      user && p.playerId === user.id
+                        ? 'bg-brand-500/20 border-brand-500/50 text-white font-bold'
+                        : 'bg-dark-900 border-slate-800 text-slate-300'
+                    }`}
+                  >
+                    {teamMode === 'TEAMS' && (
+                      <span className="text-[10px]">{pTeam === 'RED' ? '🔴' : '🔵'}</span>
+                    )}
+                    <span>{idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}</span>
+                    <span className="truncate max-w-[80px]">{p.playerName}</span>
+                    <span className="font-mono font-black text-brand-400">{p.score} pts</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

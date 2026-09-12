@@ -131,10 +131,22 @@ public class GameEngineService {
     /**
      * Initialise une nouvelle partie personnalisée (Multi-joueurs Lobby, sans impact ELO).
      */
+    /**
+     * Initialise une nouvelle partie personnalisée (Multi-joueurs Lobby, sans impact ELO).
+     */
     public GameSession createCustomMatch(String lobbyCode,
                                          Collection<com.blindtest.lobby.model.LobbyParticipant> participants,
                                          UUID themeId,
                                          int roundsCount) {
+        return createCustomMatch(lobbyCode, participants, themeId, roundsCount, "BUZZER", "INDIVIDUAL");
+    }
+
+    public GameSession createCustomMatch(String lobbyCode,
+                                         Collection<com.blindtest.lobby.model.LobbyParticipant> participants,
+                                         UUID themeId,
+                                         int roundsCount,
+                                         String gameMode,
+                                         String teamMode) {
         int rounds = (roundsCount >= 3 && roundsCount <= 30) ? roundsCount : roundsPerMatch;
         List<Track> tracks = selectTracksForGame(themeId, rounds);
 
@@ -146,10 +158,15 @@ public class GameEngineService {
         UUID p2Id = partsList.size() > 1 ? partsList.get(1).getUserId() : null;
         String p2Name = partsList.size() > 1 ? partsList.get(1).getDisplayName() : null;
 
+        String effectiveGameMode = (gameMode != null && !gameMode.isBlank()) ? gameMode : "BUZZER";
+        String effectiveTeamMode = (teamMode != null && !teamMode.isBlank()) ? teamMode : "INDIVIDUAL";
+
         GameSession session = GameSession.builder()
                 .gameId(gameId)
                 .isCustom(true)
                 .lobbyCode(lobbyCode)
+                .gameMode(effectiveGameMode)
+                .teamMode(effectiveTeamMode)
                 .player1Id(p1Id)
                 .player2Id(p2Id)
                 .player1Name(p1Name)
@@ -161,6 +178,9 @@ public class GameEngineService {
                 .state(SessionState.WAITING_READY)
                 .build();
 
+        session.getTeamScores().put("BLUE", 0);
+        session.getTeamScores().put("RED", 0);
+
         for (com.blindtest.lobby.model.LobbyParticipant p : partsList) {
             if (p.getUserId() != null) {
                 session.getPlayerIds().add(p.getUserId());
@@ -168,12 +188,14 @@ public class GameEngineService {
                 session.getPlayerAvatars().put(p.getUserId(), p.getAvatarUrl() != null ? p.getAvatarUrl() : "");
                 session.getPlayerElos().put(p.getUserId(), p.getElo());
                 session.getPlayerScores().put(p.getUserId(), 0);
+                String team = p.getTeam() != null ? p.getTeam() : "BLUE";
+                session.getPlayerTeams().put(p.getUserId(), team);
             }
         }
 
         activeSessions.put(gameId, session);
-        log.info("Session personnalisée créée [gameId={}, lobby={}] avec {} joueurs.",
-                gameId, lobbyCode, session.getPlayerIds().size());
+        log.info("Session personnalisée créée [gameId={}, lobby={}] mode={}, teamMode={} avec {} joueurs.",
+                gameId, lobbyCode, effectiveGameMode, effectiveTeamMode, session.getPlayerIds().size());
 
         // Pré-rafraîchissement asynchrone des morceaux Deezer
         CompletableFuture.runAsync(() -> {
@@ -243,6 +265,10 @@ public class GameEngineService {
                 entry("gameId", gameId),
                 entry("isCustom", session.isCustom()),
                 entry("lobbyCode", session.getLobbyCode() != null ? session.getLobbyCode() : ""),
+                entry("gameMode", session.getGameMode() != null ? session.getGameMode() : "BUZZER"),
+                entry("teamMode", session.getTeamMode() != null ? session.getTeamMode() : "INDIVIDUAL"),
+                entry("teamScores", session.getTeamScores()),
+                entry("playerTeams", session.getPlayerTeams()),
                 entry("player1Id", session.getPlayer1Id() != null ? session.getPlayer1Id().toString() : ""),
                 entry("player2Id", session.getPlayer2Id() != null ? session.getPlayer2Id().toString() : ""),
                 entry("player1Name", session.getPlayer1Name() != null ? session.getPlayer1Name() : ""),
@@ -304,6 +330,10 @@ public class GameEngineService {
                 entry("event", "ROUND_RESYNC"),
                 entry("targetPlayerId", playerId != null ? playerId.toString() : ""),
                 entry("gameId", gameId),
+                entry("gameMode", session.getGameMode() != null ? session.getGameMode() : "BUZZER"),
+                entry("teamMode", session.getTeamMode() != null ? session.getTeamMode() : "INDIVIDUAL"),
+                entry("teamScores", session.getTeamScores()),
+                entry("playerTeams", session.getPlayerTeams()),
                 entry("player1Id", session.getPlayer1Id() != null ? session.getPlayer1Id().toString() : ""),
                 entry("player2Id", session.getPlayer2Id() != null ? session.getPlayer2Id().toString() : ""),
                 entry("player1Name", session.getPlayer1Name() != null ? session.getPlayer1Name() : ""),
@@ -325,6 +355,9 @@ public class GameEngineService {
     public boolean handleBuzz(UUID gameId, UUID playerId) {
         GameSession session = getSession(gameId);
         if (session == null || session.getState() != SessionState.PLAYING) {
+            return false;
+        }
+        if ("NO_BUZZER".equalsIgnoreCase(session.getGameMode())) {
             return false;
         }
 
@@ -614,6 +647,7 @@ public class GameEngineService {
                 .player1Score(session.getPlayer1Score())
                 .player2Score(session.getPlayer2Score())
                 .playerScores(scoresStringMap)
+                .teamScores(new HashMap<>(session.getTeamScores()))
                 .wrongGuesses(new ArrayList<>(session.getWrongGuessesInRound()))
                 .build();
         session.getRoundHistory().add(roundEntry);
@@ -624,6 +658,10 @@ public class GameEngineService {
                 entry("event", "ROUND_END"),
                 entry("isCustom", session.isCustom()),
                 entry("lobbyCode", session.getLobbyCode() != null ? session.getLobbyCode() : ""),
+                entry("gameMode", session.getGameMode() != null ? session.getGameMode() : "BUZZER"),
+                entry("teamMode", session.getTeamMode() != null ? session.getTeamMode() : "INDIVIDUAL"),
+                entry("teamScores", session.getTeamScores()),
+                entry("playerTeams", session.getPlayerTeams()),
                 entry("roundNumber", session.getCurrentRoundIndex() + 1),
                 entry("player1Id", session.getPlayer1Id() != null ? session.getPlayer1Id().toString() : ""),
                 entry("player2Id", session.getPlayer2Id() != null ? session.getPlayer2Id().toString() : ""),
@@ -795,6 +833,10 @@ public class GameEngineService {
                     entry("event", "MATCH_FINISHED"),
                     entry("isCustom", true),
                     entry("lobbyCode", session.getLobbyCode() != null ? session.getLobbyCode() : ""),
+                    entry("gameMode", session.getGameMode() != null ? session.getGameMode() : "BUZZER"),
+                    entry("teamMode", session.getTeamMode() != null ? session.getTeamMode() : "INDIVIDUAL"),
+                    entry("teamScores", session.getTeamScores()),
+                    entry("playerTeams", session.getPlayerTeams()),
                     entry("player1Id", session.getPlayer1Id() != null ? session.getPlayer1Id().toString() : ""),
                     entry("player2Id", session.getPlayer2Id() != null ? session.getPlayer2Id().toString() : ""),
                     entry("player1Name", session.getPlayer1Name() != null ? session.getPlayer1Name() : ""),
@@ -933,9 +975,80 @@ public class GameEngineService {
             map.put("avatarUrl", session.getPlayerAvatars().getOrDefault(pid, ""));
             map.put("elo", session.getPlayerElos().getOrDefault(pid, 1000));
             map.put("score", session.getPlayerScores().getOrDefault(pid, 0));
+            map.put("team", session.getPlayerTeams().getOrDefault(pid, "BLUE"));
             list.add(map);
         }
         list.sort((a, b) -> Integer.compare((int) b.get("score"), (int) a.get("score")));
         return list;
+    }
+
+    /**
+     * Traitement d'une réponse en mode NO_BUZZER (tous les joueurs peuvent proposer des réponses simultanément pendant l'écoute).
+     */
+    public void handleFreeAnswer(UUID gameId, UUID playerId, String rawGuess) {
+        GameSession session = getSession(gameId);
+        if (session == null || session.getState() != SessionState.PLAYING) return;
+        if (!"NO_BUZZER".equalsIgnoreCase(session.getGameMode())) return;
+        if (rawGuess == null || rawGuess.isBlank()) return;
+
+        Track track = session.getCurrentTrack();
+        if (track == null) return;
+
+        boolean myTitleFound = session.getRoundFoundTitles().contains(playerId);
+        boolean myArtistFound = session.getRoundFoundArtists().contains(playerId);
+
+        // Si le joueur a déjà validé à la fois le Titre et l'Artiste sur cette manche, il ne peut plus marquer
+        if (myTitleFound && myArtistFound) return;
+
+        VerificationResult result = levenshteinMatcher.evaluate(rawGuess, track, myTitleFound, myArtistFound);
+
+        if (result.matched()) {
+            String foundType = result.guessType() == GuessType.TITLE ? "TITLE" : "ARTIST";
+            String playerName = session.getPlayerNames().getOrDefault(playerId, "Joueur");
+
+            if (result.guessType() == GuessType.TITLE && !myTitleFound) {
+                session.getRoundFoundTitles().add(playerId);
+                session.addScore(playerId, 1);
+                updateThemeStats(playerId, session.getThemeId(), true, false);
+                log.info("[NO_BUZZER] Joueur '{}' a trouvé le TITRE '{}' !", playerName, result.matchedName());
+            } else if (result.guessType() == GuessType.ARTIST && !myArtistFound) {
+                session.getRoundFoundArtists().add(playerId);
+                session.addScore(playerId, 1);
+                updateThemeStats(playerId, session.getThemeId(), false, true);
+                log.info("[NO_BUZZER] Joueur '{}' a trouvé l'ARTISTE '{}' !", playerName, result.matchedName());
+            } else {
+                return;
+            }
+
+            Map<String, Object> correctPayload = Map.of(
+                    "event", "FREE_ANSWER_CORRECT",
+                    "playerId", playerId.toString(),
+                    "playerName", playerName,
+                    "foundType", foundType,
+                    "foundName", result.matchedName(),
+                    "playerTeam", session.getPlayerTeams().getOrDefault(playerId, "BLUE"),
+                    "playerScores", session.getPlayerScores(),
+                    "teamScores", session.getTeamScores(),
+                    "leaderboard", buildLeaderboard(session)
+            );
+            messagingTemplate.convertAndSend("/topic/game/" + gameId, correctPayload);
+
+            // Si tous les joueurs ont trouvé le titre et l'artiste, clore la manche en avance
+            int total = session.getTotalPlayers();
+            if (total > 0 && session.getRoundFoundTitles().size() >= total && session.getRoundFoundArtists().size() >= total) {
+                log.info("[NO_BUZZER] Tous les joueurs ont tout trouvé ! Fin anticipée de la manche.");
+                endRound(gameId);
+            }
+        } else {
+            // Mauvaise réponse en mode libre : feedback pour le joueur sans interruption audio
+            String playerName = session.getPlayerNames().getOrDefault(playerId, "Joueur");
+            Map<String, Object> wrongPayload = Map.of(
+                    "event", "FREE_ANSWER_WRONG",
+                    "playerId", playerId.toString(),
+                    "playerName", playerName,
+                    "guess", rawGuess.trim()
+            );
+            messagingTemplate.convertAndSend("/topic/game/" + gameId, wrongPayload);
+        }
     }
 }

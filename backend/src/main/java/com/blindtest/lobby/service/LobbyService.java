@@ -86,11 +86,16 @@ public class LobbyService {
             existing.setElo(playerElo);
         } else {
             boolean isFirst = lobby.getParticipants().isEmpty();
+            long blueCount = lobby.getParticipants().values().stream().filter(p -> "BLUE".equalsIgnoreCase(p.getTeam())).count();
+            long redCount = lobby.getParticipants().values().stream().filter(p -> "RED".equalsIgnoreCase(p.getTeam())).count();
+            String assignedTeam = (blueCount <= redCount) ? "BLUE" : "RED";
+
             LobbyParticipant participant = LobbyParticipant.builder()
                     .userId(userId)
                     .displayName(displayName != null ? displayName : "Joueur")
                     .avatarUrl(avatarUrl)
                     .elo(playerElo)
+                    .team(assignedTeam)
                     .isHost(isFirst || userId.equals(lobby.getHostId()))
                     .isReady(true)
                     .build();
@@ -140,6 +145,10 @@ public class LobbyService {
     }
 
     public Lobby updateSettings(String rawCode, UUID requestingUserId, UUID themeId, String themeName, Integer roundsCount) {
+        return updateSettings(rawCode, requestingUserId, themeId, themeName, roundsCount, null, null);
+    }
+
+    public Lobby updateSettings(String rawCode, UUID requestingUserId, UUID themeId, String themeName, Integer roundsCount, String gameMode, String teamMode) {
         String code = rawCode.trim().toUpperCase();
         Lobby lobby = lobbies.get(code);
         if (lobby == null) {
@@ -157,8 +166,32 @@ public class LobbyService {
         if (roundsCount != null && roundsCount >= 3 && roundsCount <= 30) {
             lobby.setRoundsCount(roundsCount);
         }
+        if (gameMode != null && !gameMode.isBlank()) {
+            lobby.setGameMode("NO_BUZZER".equalsIgnoreCase(gameMode) ? "NO_BUZZER" : "BUZZER");
+        }
+        if (teamMode != null && !teamMode.isBlank()) {
+            lobby.setTeamMode("TEAMS".equalsIgnoreCase(teamMode) ? "TEAMS" : "INDIVIDUAL");
+        }
 
         broadcastLobbyUpdate(lobby);
+        return lobby;
+    }
+
+    public Lobby switchTeam(String rawCode, UUID userId, String targetTeam) {
+        String code = rawCode.trim().toUpperCase();
+        Lobby lobby = lobbies.get(code);
+        if (lobby == null) {
+            throw new IllegalArgumentException("Salon introuvable.");
+        }
+        LobbyParticipant participant = lobby.getParticipants().get(userId);
+        if (participant == null) {
+            throw new IllegalArgumentException("Participant introuvable.");
+        }
+        String normalizedTeam = "RED".equalsIgnoreCase(targetTeam) ? "RED" : "BLUE";
+        participant.setTeam(normalizedTeam);
+        lobby.setLastActivityAt(Instant.now());
+        broadcastLobbyUpdate(lobby);
+        log.info("Joueur '{}' a rejoint l'équipe {} dans le salon {}", participant.getDisplayName(), normalizedTeam, code);
         return lobby;
     }
 
@@ -182,7 +215,9 @@ public class LobbyService {
                 code,
                 lobby.getParticipantsList(),
                 lobby.getThemeId(),
-                lobby.getRoundsCount()
+                lobby.getRoundsCount(),
+                lobby.getGameMode(),
+                lobby.getTeamMode()
         );
 
         lobby.setActiveGameId(session.getGameId());
@@ -194,13 +229,15 @@ public class LobbyService {
                 "themeId", lobby.getThemeId() != null ? lobby.getThemeId().toString() : "",
                 "themeName", lobby.getThemeName(),
                 "roundsCount", lobby.getRoundsCount(),
+                "gameMode", lobby.getGameMode() != null ? lobby.getGameMode() : "BUZZER",
+                "teamMode", lobby.getTeamMode() != null ? lobby.getTeamMode() : "INDIVIDUAL",
                 "participantsCount", lobby.getParticipants().size()
         );
 
         messagingTemplate.convertAndSend("/topic/lobby/" + code, gameStartPayload);
         broadcastLobbyUpdate(lobby);
-        log.info("Partie personnalisée démarrée pour le lobby '{}' [gameId={}] avec {} joueurs.",
-                code, session.getGameId(), lobby.getParticipants().size());
+        log.info("Partie personnalisée démarrée pour le lobby '{}' [gameId={}] mode={} teamMode={} avec {} joueurs.",
+                code, session.getGameId(), lobby.getGameMode(), lobby.getTeamMode(), lobby.getParticipants().size());
 
         return lobby;
     }

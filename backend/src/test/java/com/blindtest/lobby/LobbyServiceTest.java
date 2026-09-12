@@ -93,7 +93,7 @@ class LobbyServiceTest {
         GameSession mockSession = mock(GameSession.class);
         when(mockSession.getGameId()).thenReturn(mockGameId);
 
-        when(gameEngineService.createCustomMatch(eq(code), anyCollection(), any(), anyInt()))
+        when(gameEngineService.createCustomMatch(eq(code), anyCollection(), any(), anyInt(), any(), any()))
                 .thenReturn(mockSession);
 
         Lobby startedLobby = lobbyService.startGame(code, hostId);

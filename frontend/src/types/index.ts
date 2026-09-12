@@ -42,6 +42,7 @@ export interface LeaderboardEntry {
   avatarUrl?: string;
   elo?: number;
   score: number;
+  team?: 'BLUE' | 'RED';
 }
 
 export interface LobbyParticipant {
@@ -51,6 +52,7 @@ export interface LobbyParticipant {
   elo: number;
   isHost: boolean;
   isReady: boolean;
+  team?: 'BLUE' | 'RED';
   lastGameScore?: number;
   lastGameRank?: number;
 }
@@ -62,6 +64,8 @@ export interface LobbyData {
   themeId?: string;
   themeName?: string;
   roundsCount: number;
+  gameMode?: 'BUZZER' | 'NO_BUZZER';
+  teamMode?: 'INDIVIDUAL' | 'TEAMS';
   status: 'WAITING' | 'PLAYING' | 'FINISHED';
   activeGameId?: string;
   participants: Record<string, LobbyParticipant>;
@@ -79,6 +83,10 @@ export interface RoundStartEvent {
   serverTimestamp: number;
   isCustom?: boolean;
   lobbyCode?: string;
+  gameMode?: 'BUZZER' | 'NO_BUZZER';
+  teamMode?: 'INDIVIDUAL' | 'TEAMS';
+  teamScores?: Record<string, number>;
+  playerTeams?: Record<string, string>;
   player1Id?: string;
   player2Id?: string;
   player1Name?: string;
@@ -112,7 +120,27 @@ export interface FirstAnswerCorrectEvent {
     player2: number;
   };
   playerScores?: Record<string, number>;
+  teamScores?: Record<string, number>;
   leaderboard?: LeaderboardEntry[];
+}
+
+export interface FreeAnswerCorrectEvent {
+  event: 'FREE_ANSWER_CORRECT';
+  playerId: string;
+  playerName: string;
+  foundType: 'TITLE' | 'ARTIST';
+  foundName: string;
+  playerTeam?: string;
+  playerScores: Record<string, number>;
+  teamScores?: Record<string, number>;
+  leaderboard?: LeaderboardEntry[];
+}
+
+export interface FreeAnswerWrongEvent {
+  event: 'FREE_ANSWER_WRONG';
+  playerId: string;
+  playerName?: string;
+  guess: string;
 }
 
 export interface StealOpenEvent {
@@ -129,6 +157,7 @@ export interface StealOpenEvent {
     player2: number;
   };
   playerScores?: Record<string, number>;
+  teamScores?: Record<string, number>;
   leaderboard?: LeaderboardEntry[];
 }
 
@@ -148,6 +177,8 @@ export interface RoundEndEvent {
     player2: number;
   };
   playerScores?: Record<string, number>;
+  teamScores?: Record<string, number>;
+  playerTeams?: Record<string, string>;
   leaderboard?: LeaderboardEntry[];
   titleFound?: boolean;
   artistFound?: boolean;
@@ -158,6 +189,8 @@ export interface RoundEndEvent {
   isLastRound: boolean;
   isCustom?: boolean;
   lobbyCode?: string;
+  gameMode?: 'BUZZER' | 'NO_BUZZER';
+  teamMode?: 'INDIVIDUAL' | 'TEAMS';
   player1Id?: string;
   player2Id?: string;
   player1Name?: string;
@@ -181,6 +214,7 @@ export interface RoundHistoryItem {
   player1Score?: number;
   player2Score?: number;
   playerScores?: Record<string, number>;
+  teamScores?: Record<string, number>;
   wrongGuesses?: WrongGuess[];
 }
 
@@ -201,8 +235,12 @@ export interface MatchFinishedEvent {
   player2Name?: string;
   isCustom?: boolean;
   lobbyCode?: string;
+  gameMode?: 'BUZZER' | 'NO_BUZZER';
+  teamMode?: 'INDIVIDUAL' | 'TEAMS';
   scores?: Record<string, number>;
   playerScores?: Record<string, number>;
+  teamScores?: Record<string, number>;
+  playerTeams?: Record<string, string>;
   leaderboard?: LeaderboardEntry[];
   roundHistory?: RoundHistoryItem[];
 }

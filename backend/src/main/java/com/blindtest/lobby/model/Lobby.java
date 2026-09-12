@@ -31,6 +31,12 @@ public class Lobby {
     private int roundsCount = 10;
 
     @Builder.Default
+    private String gameMode = "BUZZER"; // "BUZZER" ou "NO_BUZZER"
+
+    @Builder.Default
+    private String teamMode = "INDIVIDUAL"; // "INDIVIDUAL" ou "TEAMS"
+
+    @Builder.Default
     private LobbyStatus status = LobbyStatus.WAITING;
 
     private UUID activeGameId;

@@ -72,8 +72,18 @@ public class LobbyController {
                 request.getRequestingUserId(),
                 request.getThemeId(),
                 request.getThemeName(),
-                request.getRoundsCount()
+                request.getRoundsCount(),
+                request.getGameMode(),
+                request.getTeamMode()
         );
+        return ResponseEntity.ok(lobby);
+    }
+
+    @PostMapping("/{code}/team")
+    public ResponseEntity<Lobby> switchTeam(@PathVariable String code,
+                                            @RequestParam UUID userId,
+                                            @RequestParam String team) {
+        Lobby lobby = lobbyService.switchTeam(code, userId, team);
         return ResponseEntity.ok(lobby);
     }
 

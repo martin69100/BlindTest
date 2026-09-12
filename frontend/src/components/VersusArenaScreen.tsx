@@ -19,6 +19,7 @@ import { BuzzerButton } from './BuzzerButton';
 import { AnswerInput } from './AnswerInput';
 import { RoundRevealCard } from './RoundRevealCard';
 import { MatchVictoryModal } from './MatchVictoryModal';
+import { FreeAnswerInput } from './FreeAnswerInput';
 
 export const VersusArenaScreen: React.FC = () => {
   const {
@@ -33,6 +34,10 @@ export const VersusArenaScreen: React.FC = () => {
     player2Score,
     isSolo,
     isCustom,
+    gameMode,
+    teamMode,
+    teamScores,
+    playerTeams,
     leaderboard,
     playerScores,
     activeLobby,
@@ -236,6 +241,61 @@ export const VersusArenaScreen: React.FC = () => {
         </div>
       </div>
 
+      {/* Bannière Scores Équipe */}
+      {isCustom && teamMode === 'TEAMS' && (
+        <div className="w-full bg-dark-900/90 border border-slate-800 rounded-2xl p-4 mb-5 shadow-xl flex items-center justify-around">
+          {/* Équipe Bleue */}
+          <div
+            className={`flex items-center space-x-3 px-4 py-2.5 rounded-xl border transition-all ${
+              user && (playerTeams[user.id] || 'BLUE') === 'BLUE'
+                ? 'bg-blue-600/20 border-blue-500/60 shadow-md shadow-blue-500/10'
+                : 'bg-dark-950/60 border-slate-800/80'
+            }`}
+          >
+            <span className="text-2xl">🔵</span>
+            <div>
+              <div className="flex items-center space-x-1.5">
+                <span className="text-xs font-black text-blue-400 uppercase tracking-wider">Équipe Bleue</span>
+                {user && (playerTeams[user.id] || 'BLUE') === 'BLUE' && (
+                  <span className="text-[9px] bg-blue-500/30 text-blue-200 px-1.5 py-0.2 rounded font-extrabold">
+                    Mon équipe
+                  </span>
+                )}
+              </div>
+              <p className="text-2xl font-mono font-black text-white">
+                {teamScores['BLUE'] ?? 0} <span className="text-xs text-blue-400 font-normal">pts</span>
+              </p>
+            </div>
+          </div>
+
+          <span className="text-sm font-black text-slate-500 uppercase tracking-widest px-2">VS</span>
+
+          {/* Équipe Rouge */}
+          <div
+            className={`flex items-center space-x-3 px-4 py-2.5 rounded-xl border transition-all ${
+              user && playerTeams[user.id] === 'RED'
+                ? 'bg-rose-600/20 border-rose-500/60 shadow-md shadow-rose-500/10'
+                : 'bg-dark-950/60 border-slate-800/80'
+            }`}
+          >
+            <span className="text-2xl">🔴</span>
+            <div>
+              <div className="flex items-center space-x-1.5">
+                <span className="text-xs font-black text-rose-400 uppercase tracking-wider">Équipe Rouge</span>
+                {user && playerTeams[user.id] === 'RED' && (
+                  <span className="text-[9px] bg-rose-500/30 text-rose-200 px-1.5 py-0.2 rounded font-extrabold">
+                    Mon équipe
+                  </span>
+                )}
+              </div>
+              <p className="text-2xl font-mono font-black text-white">
+                {teamScores['RED'] ?? 0} <span className="text-xs text-rose-400 font-normal">pts</span>
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Tableau des Scores : Multijoueur Personnalisé VS 1v1 Classé */}
       {isCustom && multiplayerParticipants.length > 0 ? (
         <div className="w-full bg-dark-900/80 border border-slate-800/80 rounded-2xl p-3.5 mb-6 shadow-xl">
@@ -254,6 +314,7 @@ export const VersusArenaScreen: React.FC = () => {
               const isMe = user && p.playerId === user.id;
               const hasFailed = failedPlayerIds?.includes(p.playerId);
               const isCurrentBuzzer = buzzerPlayerId === p.playerId;
+              const pTeam = playerTeams[p.playerId] || (activeLobby?.participants ? (Array.isArray(activeLobby.participants) ? activeLobby.participants.find((x: any) => x.userId === p.playerId)?.team : (activeLobby.participants as any)[p.playerId]?.team) : undefined);
 
               return (
                 <div
@@ -272,6 +333,9 @@ export const VersusArenaScreen: React.FC = () => {
 
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center space-x-1">
+                        {teamMode === 'TEAMS' && (
+                          <span className="text-[10px] shrink-0">{pTeam === 'RED' ? '🔴' : '🔵'}</span>
+                        )}
                         <span className={`text-xs font-black truncate ${isMe ? 'text-white' : 'text-slate-300'}`}>
                           {p.playerName}
                         </span>
@@ -372,6 +436,8 @@ export const VersusArenaScreen: React.FC = () => {
           <RoundRevealCard />
         ) : phase === 'BUZZED' || phase === 'BONUS' ? (
           <AnswerInput />
+        ) : gameMode === 'NO_BUZZER' ? (
+          <FreeAnswerInput />
         ) : (
           <div className="flex flex-col items-center justify-center space-y-4">
             <BuzzerButton />
@@ -394,12 +460,19 @@ export const VersusArenaScreen: React.FC = () => {
       </div>
 
       {/* Règle & Info Vol de Main */}
-      <div className="text-center text-[11px] text-slate-500 font-medium">
-        <span>
-          {isCustom
+      <div className="text-center text-[11px] text-slate-500 font-medium space-y-1">
+        <p>
+          {gameMode === 'NO_BUZZER'
+            ? 'Règle : Saisie libre pendant les 20s • +1 pt Titre • +1 pt Artiste • Tout le monde joue en continu !'
+            : isCustom
             ? 'Règle : 1er buzz valide Titre ou Artiste (+1 pt) • Bonus 10s pour la 2ème info (+1 pt) • Vol de main ouvert • ELO protégé'
             : 'Règle : 1er buzz valide Titre ou Artiste (+1 pt) • Bonus 10s pour la 2ème info (+1 pt) • Vol de main actif'}
-        </span>
+        </p>
+        {isCustom && teamMode === 'TEAMS' && (
+          <p className="text-indigo-400 font-bold">
+            👥 Match par équipes : Les points individuels alimentent le score de votre équipe !
+          </p>
+        )}
       </div>
 
       {/* Modale de confirmation d'abandon / arrêt de session */}
